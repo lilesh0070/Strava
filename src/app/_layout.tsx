@@ -1,6 +1,7 @@
 import '../lib/tracker'; // registers the background location task at startup
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import CrashScreen from '../components/CrashScreen';
 import UpdateBanner from '../components/UpdateBanner';
 import { ThemeProvider, useTheme } from '../lib/theme';
 
@@ -21,6 +22,10 @@ function Root() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="activity/[id]" options={{ title: 'Activity' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="add-activity" options={{ title: 'Add activity', presentation: 'modal' }} />
+        <Stack.Screen name="heatmap" options={{ title: 'Your heatmap' }} />
+        <Stack.Screen name="achievements" options={{ title: 'Achievements' }} />
+        <Stack.Screen name="workouts" options={{ title: 'Interval workouts' }} />
       </Stack>
       <UpdateBanner />
     </>
@@ -33,4 +38,9 @@ export default function RootLayout() {
       <Root />
     </ThemeProvider>
   );
+}
+
+/** Last-resort screen if a render crashes, instead of a white screen. */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  return <CrashScreen error={error} retry={retry} />;
 }

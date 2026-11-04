@@ -1,4 +1,7 @@
+import { router } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
+import { View } from 'react-native';
+import { NeuIconButton } from '../../components/Neu';
 import NeuTabBar from '../../components/NeuTabBar';
 import SettingsButton from '../../components/SettingsButton';
 import { useTheme } from '../../lib/theme';
@@ -18,7 +21,15 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: C.bg },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Feed' }} />
+      <Tabs.Screen name="index" options={{
+        title: 'Feed',
+        headerRight: () => (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <NeuIconButton icon="plus" size={40} accessibilityLabel="Add activity manually" onPress={() => router.push('/add-activity')} />
+            <SettingsButton />
+          </View>
+        ),
+      }} />
       <Tabs.Screen name="record" options={{ title: 'Record', headerShown: false }} />
       <Tabs.Screen name="profile" options={{ title: 'You' }} />
     </Tabs>

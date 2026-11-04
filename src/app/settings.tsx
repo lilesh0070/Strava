@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Text, TextInput, View } from 'react-native';
-import { IconWell, NeuButton, NeuCard, NeuProgress, NeuSegmented, NeuSwitch, NeuTile } from '../components/Neu';
+import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress, NeuSegmented, NeuSwitch, NeuTile } from '../components/Neu';
 import { parsePace } from '../lib/live';
+import { setDailyReminder } from '../lib/reminders';
 import { fmtDuration } from '../lib/geo';
 import { exportBackup, importBackup, storageBytes } from '../lib/backup';
 import { getSettings, saveSettings } from '../lib/storage';
@@ -154,6 +155,34 @@ export default function SettingsScreen() {
             onPress={() => IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
               .catch(() => Linking.openSettings())} />
         )}
+      </Section>
+
+      <Section title="Motivation">
+        <NeuCard radius={26} style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconWell icon="bell-ring-outline" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>Daily reminder</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>A gentle nudge every day at {s.reminderHour}:00</Text>
+            </View>
+            <NeuSwitch accessibilityLabel="Daily reminder" value={s.reminder} onValueChange={async (v) => {
+              const ok = await setDailyReminder(v, s.reminderHour).catch(() => false);
+              if (!ok) { Alert.alert('Notifications are off', 'Allow notifications for Stride in system settings.'); return; }
+              set({ reminder: v });
+            }} />
+          </View>
+          {s.reminder && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+              <NeuIconButton icon="minus" size={38} accessibilityLabel="Earlier" onPress={() => {
+                const h = (s.reminderHour + 23) % 24; set({ reminderHour: h }); setDailyReminder(true, h);
+              }} />
+              <Text style={{ color: C.text, fontWeight: '800', fontSize: 18, width: 70, textAlign: 'center' }}>{String(s.reminderHour).padStart(2, '0')}:00</Text>
+              <NeuIconButton icon="plus" size={38} accessibilityLabel="Later" onPress={() => {
+                const h = (s.reminderHour + 1) % 24; set({ reminderHour: h }); setDailyReminder(true, h);
+              }} />
+            </View>
+          )}
+        </NeuCard>
       </Section>
 
       <Section title="Your data">

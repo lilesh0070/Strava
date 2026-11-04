@@ -1,5 +1,6 @@
 import type { Point } from './geo';
 import type { KalmanState, Lap, LapMark } from './live';
+import type { WorkoutProgress } from './workouts';
 
 export type Sport = 'run' | 'ride' | 'walk' | 'hike';
 
@@ -27,10 +28,14 @@ export type Activity = {
   gearId?: string;
   laps?: Lap[];
   maxSpeedMs?: number;
+  manual?: boolean; // entered by hand (treadmill, gym, forgot to record)
+  workoutName?: string;
 };
 
 export type GearKind = 'shoes' | 'bike';
-export type Gear = { id: string; name: string; kind: GearKind; isDefault?: boolean; retired?: boolean };
+export type Gear = { id: string; name: string; kind: GearKind; isDefault?: boolean; retired?: boolean; limitKm?: number };
+/** Typical running-shoe lifespan before cushioning is worn out. */
+export const DEFAULT_SHOE_LIMIT_KM = 700;
 export const gearKindFor = (s: Sport): GearKind => (s === 'ride' ? 'bike' : 'shoes');
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
@@ -43,9 +48,12 @@ export type Settings = {
   gpsMode: GpsMode;
   autoCheckUpdates: boolean;
   targetPaceSec: number | null; // pace coach target (sec/km); null = off
+  reminder: boolean;
+  reminderHour: number;
 };
 export const DEFAULT_SETTINGS: Settings = {
   voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, targetPaceSec: null,
+  reminder: false, reminderHour: 18,
 };
 
 export type Session = {
@@ -62,6 +70,7 @@ export type Session = {
   laps?: LapMark[];
   lastPaceAlertAt?: number;
   maxSpeedMs?: number;
+  workout?: WorkoutProgress | null;
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {

@@ -5,7 +5,7 @@ const INDEX = 'stride:activities';
 const item = (id: string) => `stride:activity:${id}`;
 const PROFILE = 'stride:profile';
 
-export type Profile = { name: string; weeklyGoalKm: number };
+export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -78,7 +78,7 @@ export async function defaultGear(kind: GearKind): Promise<Gear | undefined> {
 
 export async function getProfile(): Promise<Profile> {
   const raw = await AsyncStorage.getItem(PROFILE);
-  return { name: 'Athlete', weeklyGoalKm: 20, ...(raw ? JSON.parse(raw) : {}) };
+  return { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80, ...(raw ? JSON.parse(raw) : {}) };
 }
 
 export async function saveProfile(p: Profile): Promise<void> {

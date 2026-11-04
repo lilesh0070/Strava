@@ -7,7 +7,9 @@ import ElevationChart from '../../components/ElevationChart';
 import RouteMap from '../../components/RouteMap';
 import Stat from '../../components/Stat';
 import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, splits } from '../../lib/geo';
-import { deleteActivity, getActivity, saveActivity } from '../../lib/storage';
+import { estimateCalories } from '../../lib/calories';
+import PaceChart from '../../components/PaceChart';
+import { deleteActivity, getActivity, getProfile, saveActivity } from '../../lib/storage';
 import { shareGpx } from '../../lib/exportGpx';
 import { useTheme } from '../../lib/theme';
 import { IconWell, NeuCard, NeuIconButton } from '../../components/Neu';
@@ -20,6 +22,8 @@ export default function ActivityDetail() {
   const [a, setA] = useState<Activity | null | undefined>(undefined);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
+  const [weightKg, setWeightKg] = useState(70);
+  useEffect(() => { getProfile().then((p) => setWeightKg(p.weightKg)); }, []);
 
   useEffect(() => { getActivity(id).then((x) => { setA(x); setName(x?.name ?? ''); }); }, [id]);
 
@@ -60,9 +64,11 @@ export default function ActivityDetail() {
         ),
       }} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <View style={{ margin: 20, marginBottom: 0, borderRadius: 30, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-          <RouteMap segments={a.segments} style={{ height: 280, borderRadius: 24 }} />
-        </View>
+        {a.segments.some((g) => g.length > 1) ? (
+          <View style={{ margin: 20, marginBottom: 0, borderRadius: 30, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
+            <RouteMap segments={a.segments} style={{ height: 280, borderRadius: 24 }} />
+          </View>
+        ) : null}
         <View style={{ padding: 20, gap: 24 }}>
           <View>
             <Text style={{ color: C.muted, fontSize: 13 }}>{fmtDate(a.startedAt)}</Text>
@@ -93,12 +99,13 @@ export default function ActivityDetail() {
               <Stat label="Elev gain" value={String(a.elevGainM)} unit="m" />
               <Stat label="Max elev" value={Number.isFinite(maxAlt) ? String(Math.round(maxAlt)) : '–'} unit="m" />
             </View>
-            {a.maxSpeedMs ? (
-              <View style={{ flexDirection: 'row' }}>
-                <Stat label="Max speed" value={(a.maxSpeedMs * 3.6).toFixed(1)} unit="km/h" />
-                {a.effort ? <Stat label="Effort" value={`${a.effort}/10`} /> : <View style={{ flex: 1 }} />}
-              </View>
-            ) : null}
+            <View style={{ flexDirection: 'row' }}>
+              <Stat label="Calories" value={String(estimateCalories(a.sport, a.distanceM, a.movingSec, weightKg))} unit="kcal" />
+              {a.maxSpeedMs
+                ? <Stat label="Max speed" value={(a.maxSpeedMs * 3.6).toFixed(1)} unit="km/h" />
+                : <Stat label="Effort" value={a.effort ? `${a.effort}/10` : '–'} />}
+            </View>
+            {a.manual ? <Text style={{ color: C.muted, fontSize: 12 }}>Added manually · no GPS route</Text> : null}
           </NeuCard>
 
           {a.laps && a.laps.length > 1 && (
@@ -121,6 +128,8 @@ export default function ActivityDetail() {
           )}
 
           <DetailsCard a={a} onChange={update} />
+
+          <PaceChart segments={a.segments} usesPace={info.usesPace} width={width - 88} />
 
           {data.cum.alt.some((x) => x != null) && (
             <NeuCard radius={28} style={{ gap: 14 }}>

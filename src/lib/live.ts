@@ -74,3 +74,25 @@ export function gpsHealth(lastFix: Point | null, now: number): GpsHealth {
   if (!lastFix || now - lastFix.t > 15_000) return 'lost';
   return (lastFix.acc ?? 99) <= 20 ? 'good' : 'weak';
 }
+
+// ---------- pace series for charts ----------
+/** Speed (m/s) sampled every `stepM` metres along the activity, lightly smoothed. */
+export function speedSeries(segments: Point[][], stepM = 100): { d: number; v: number }[] {
+  const out: { d: number; v: number }[] = [];
+  let dist = 0, bucketD = 0, bucketT = 0;
+  for (const seg of segments) {
+    for (let i = 1; i < seg.length; i++) {
+      const dd = haversine(seg[i - 1], seg[i]), dt = (seg[i].t - seg[i - 1].t) / 1000;
+      dist += dd; bucketD += dd; bucketT += dt;
+      if (bucketD >= stepM) {
+        if (bucketT > 0) out.push({ d: dist, v: bucketD / bucketT });
+        bucketD = 0; bucketT = 0;
+      }
+    }
+  }
+  // 3-point moving average
+  return out.map((p, i) => {
+    const w = out.slice(Math.max(0, i - 1), i + 2);
+    return { d: p.d, v: w.reduce((s, x) => s + x.v, 0) / w.length };
+  });
+}

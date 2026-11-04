@@ -3,8 +3,8 @@ import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { fmtKm } from '../lib/geo';
 import { listGear, saveGearList } from '../lib/storage';
 import { useTheme } from '../lib/theme';
-import { IconWell, NeuButton, NeuCard, NeuIconButton } from './Neu';
-import type { Activity, Gear, GearKind } from '../lib/types';
+import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress } from './Neu';
+import { DEFAULT_SHOE_LIMIT_KM, type Activity, type Gear, type GearKind } from '../lib/types';
 
 export default function GearCard({ activities }: { activities: Activity[] }) {
   const { C, S, F } = useTheme();
@@ -19,7 +19,7 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
     const name = draft.trim();
     if (!name) return;
     const first = !gear.some((g) => g.kind === kind && !g.retired);
-    save([...gear, { id: Date.now().toString(36), name, kind, isDefault: first }]);
+    save([...gear, { id: Date.now().toString(36), name, kind, isDefault: first, limitKm: kind === 'shoes' ? DEFAULT_SHOE_LIMIT_KM : undefined }]);
     setDraft('');
   };
 
@@ -44,11 +44,23 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
           style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 20,
             backgroundColor: C.bg, boxShadow: pressed ? S.insetSm : S.raisedSm, opacity: g.retired ? 0.55 : 1 })}>
           <IconWell icon={g.kind === 'bike' ? 'bike' : 'shoe-sneaker'} size={38} />
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, gap: 6 }}>
             <Text style={{ color: C.text, fontWeight: '600' }}>
               {g.name}{g.isDefault ? <Text style={{ color: C.accent, fontSize: 12 }}>  default</Text> : null}
               {g.retired ? <Text style={{ color: C.muted, fontSize: 12 }}>  retired</Text> : null}
             </Text>
+            {g.limitKm && !g.retired ? (() => {
+              const km = used(g.id) / 1000, frac = km / g.limitKm;
+              return (
+                <>
+                  <NeuProgress value={frac} />
+                  <Text style={{ color: frac >= 0.9 ? C.danger : C.muted, fontSize: 11 }}>
+                    {frac >= 1 ? 'Worn out — time for new shoes' : frac >= 0.9 ? 'Nearly worn out — plan a replacement'
+                      : `${Math.max(0, Math.round(g.limitKm - km))} km of ${g.limitKm} left`}
+                  </Text>
+                </>
+              );
+            })() : null}
           </View>
           <Text style={{ color: C.text, fontVariant: ['tabular-nums'] }}>{fmtKm(used(g.id))} km</Text>
         </Pressable>

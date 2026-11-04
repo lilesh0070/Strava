@@ -31,6 +31,19 @@ The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is 
 - **Live stats.** Pace now (rolling 30 s), average pace, the current lap, a lap button with voice summaries, and max speed.
 - **Pace coach.** Set a target like 5:30/km and get voice nudges when you drift ±15 s.
 - **Reliable background setup.** A shortcut to Android's battery-optimisation screen.
+- **Interval workouts.** Presets include run/walk, 6×400 m, 5×1 km, pyramid and tempo. Voice cues for every step and a live "x left" counter.
+- **Badges.** 11 achievements computed from your history (5K, 10K, half, century ride, early bird, streaks…), with a pop-up when you earn one.
+- **Heatmap.** All your routes drawn on one map.
+- **Pace chart** on every activity.
+- **Calories.** MET-based estimate using your body weight.
+- **Manual activities** for treadmill, gym, or a run you forgot to record.
+- **Shoe wear.** A 700 km life bar with a "replace soon" warning.
+- **Daily reminder** notification at a time you choose.
+- **Battery-friendly tracking.**
+  - Session saved every 15 s instead of every fix.
+  - No UI or map work while the screen is off.
+  - GPS fixes rounded and batched in battery-saver mode.
+  - Crash screen that keeps your data safe.
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports merge with existing data and never delete anything.
 

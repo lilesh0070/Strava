@@ -10,7 +10,10 @@ import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed, totalDistance } from '../../lib/geo';
 import { gpsHealth, lapsFromMarks } from '../../lib/live';
-import { getSettings } from '../../lib/storage';
+import { newlyEarned } from '../../lib/achievements';
+import { getSettings, listActivities } from '../../lib/storage';
+import { useSelectedWorkout } from '../../lib/workoutSelection';
+import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
 import { SPORTS, sessionMovingSec, sportInfo, type Sport } from '../../lib/types';
@@ -33,6 +36,7 @@ export default function Record() {
   const [, tick] = useState(0);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const selectedWorkout = useSelectedWorkout();
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // restore an in-progress session after app restart
@@ -42,7 +46,7 @@ export default function Record() {
   // live clock
   useEffect(() => {
     if (!session) return;
-    const id = setInterval(() => tick((n) => n + 1), 1000);
+    const id = setInterval(() => { tick((n) => n + 1); tracker.workoutTick(); }, 1000);
     return () => clearInterval(id);
   }, [session]);
 
@@ -72,7 +76,7 @@ export default function Record() {
 
   const begin = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    await tracker.start(sport);
+    await tracker.start(sport, selectedWorkout);
   };
 
   const onStart = async () => {
@@ -121,9 +125,13 @@ export default function Record() {
       {
         text: 'Save',
         onPress: async () => {
+          const before = await listActivities().catch(() => []);
           const a = await tracker.finish();
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-          if (a) router.push(`/activity/${a.id}`);
+          if (!a) return;
+          router.push(`/activity/${a.id}`);
+          const badges = newlyEarned(before, a);
+          if (badges.length) Alert.alert('New badge!', badges.map((b) => `🏅 ${b.title} — ${b.detail}`).join('\n'));
         },
       },
     ]);
@@ -183,6 +191,23 @@ export default function Record() {
               <Stat label={`Lap ${lapRows.length || 1}`} value={openLap ? fmtDuration(openLap.durationSec) : '0:00'} />
               <Stat label="Lap dist" value={openLap ? fmtKm(openLap.distanceM) : '0.00'} unit="km" />
             </View>
+            {(() => {
+              const w = findWorkout(active.workout?.workoutId);
+              if (!w || !active.workout) return null;
+              if (active.workout.done) return <Text style={{ color: C.success, textAlign: 'center', fontWeight: '800' }}>Workout complete ✓</Text>;
+              const step = w.steps[active.workout.index];
+              const left = remaining(w, active.workout, active.distanceM ?? 0, moving);
+              return (
+                <NeuCard inset radius={20} padding={12} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ color: step.kind === 'work' ? C.accent : C.muted, fontWeight: '800' }}>
+                    {stepLabel(step)} · {active.workout.index + 1}/{w.steps.length}
+                  </Text>
+                  <Text style={{ color: C.text, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
+                    {step.by === 'distance' ? `${Math.round(left)} m left` : `${fmtDuration(left)} left`}
+                  </Text>
+                </NeuCard>
+              );
+            })()}
             {active.status === 'paused' && (
               <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '800' }}>
                 {active.autoPaused ? 'AUTO-PAUSED · start moving to resume' : 'PAUSED'}
@@ -218,6 +243,8 @@ export default function Record() {
                 );
               })}
             </View>
+            <NeuButton small icon="timer-outline" label={findWorkout(selectedWorkout)?.name ?? 'Free run · choose workout'}
+              selected={!!selectedWorkout} onPress={() => router.push('/workouts')} style={{ alignSelf: 'center' }} />
             <View style={{ alignItems: 'center' }}>
               <NeuIconButton icon="play" size={84} accent accessibilityLabel={`Start ${info.label}`} onPress={onStart} />
             </View>

@@ -3,7 +3,9 @@ import { ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-na
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
 import CalendarCard from '../../components/CalendarCard';
 import GearCard from '../../components/GearCard';
-import { IconWell, NeuButton, NeuCard, NeuProgress } from '../../components/Neu';
+import { router } from 'expo-router';
+import { IconWell, NeuButton, NeuCard, NeuProgress, NeuTile } from '../../components/Neu';
+import { evaluateAchievements } from '../../lib/achievements';
 import Stat from '../../components/Stat';
 import { bestEffort, fmtDuration, fmtKm } from '../../lib/geo';
 import { getProfile, saveProfile, type Profile } from '../../lib/storage';
@@ -89,6 +91,13 @@ export default function ProfileScreen() {
         </View>
       </NeuCard>
 
+      <View style={{ flexDirection: 'row', gap: 16 }}>
+        <NeuTile icon="trophy-variant-outline" title="Badges" subtitle={`${evaluateAchievements(items ?? []).filter((x) => x.earned).length} earned`}
+          style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/achievements')} />
+        <NeuTile icon="map-legend" title="Heatmap" subtitle="All routes"
+          style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/heatmap')} />
+      </View>
+
       <CalendarCard activities={items ?? []} />
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }}
@@ -164,6 +173,21 @@ export default function ProfileScreen() {
           ))}
         </NeuCard>
       )}
+
+      <NeuCard radius={28} style={{ gap: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <IconWell icon="scale-bathroom" />
+          <View style={{ flex: 1 }}>
+            <Text style={F.h2}>Body weight</Text>
+            <Text style={{ color: C.muted, fontSize: 12 }}>Used only to estimate calories, stays on this phone</Text>
+          </View>
+          <TextInput keyboardType="numeric" value={String(profile?.weightKg ?? '')} accessibilityLabel="Body weight in kilograms"
+            onChangeText={(t) => update({ weightKg: Math.min(300, Math.max(0, Number(t.replace(/[^0-9.]/g, '')) || 0)) })}
+            style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 12,
+              paddingVertical: 8, minWidth: 64, textAlign: 'center', fontWeight: '700' }} />
+          <Text style={{ color: C.muted }}>kg</Text>
+        </View>
+      </NeuCard>
 
       <GearCard activities={items ?? []} />
     </ScrollView>

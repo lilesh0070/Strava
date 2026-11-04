@@ -4,10 +4,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { AppState } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
+import { advance, findWorkout, startProgress, stepCue } from './workouts';
 import { expectedSpeed, kalmanStep, lapsFromMarks, paceAdvice, rollingSpeed } from './live';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
@@ -37,7 +39,18 @@ function locked<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-function notify() { listeners.forEach((l) => l()); }
+// Battery: while the app is in the background nobody can see the UI, so skip re-rendering
+// (and the map WebView redraw it triggers) and only persist periodically.
+let appActive = AppState.currentState === 'active';
+AppState.addEventListener('change', (st) => {
+  appActive = st === 'active';
+  if (appActive) notify();
+  else persist().catch(() => undefined); // make sure nothing is lost if the OS kills us
+});
+function notify() { if (appActive) listeners.forEach((l) => l()); }
+
+const PERSIST_EVERY_MS = 15_000;
+let lastPersistAt = 0;
 export function subscribe(fn: () => void) {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
@@ -52,16 +65,23 @@ async function load() {
   loaded = true;
 }
 async function persist() {
+  lastPersistAt = Date.now();
   if (session) await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
   else await AsyncStorage.removeItem(SESSION_KEY);
 }
+/** Writing the whole session every second is the biggest CPU/battery cost after GPS; throttle it. */
+async function persistSoon() {
+  if (Date.now() - lastPersistAt >= PERSIST_EVERY_MS) await persist();
+}
 
+const r = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
 function toPoint(l: Location.LocationObject): Point {
+  // ~10 cm precision is plenty and keeps stored activities small
   return {
-    lat: l.coords.latitude,
-    lng: l.coords.longitude,
-    alt: l.coords.altitude ?? null,
-    acc: l.coords.accuracy ?? null,
+    lat: r(l.coords.latitude, 6),
+    lng: r(l.coords.longitude, 6),
+    alt: l.coords.altitude == null ? null : r(l.coords.altitude, 1),
+    acc: l.coords.accuracy == null ? null : Math.round(l.coords.accuracy),
     t: l.timestamp,
   };
 }
@@ -69,6 +89,7 @@ function toPoint(l: Location.LocationObject): Point {
 export function ingest(locations: Location.LocationObject[]) {
   return locked(async () => {
     await load();
+    const statusBefore = session?.status;
     for (const l of locations) {
       const p = toPoint(l);
       lastFix = p;
@@ -107,6 +128,7 @@ export function ingest(locations: Location.LocationObject[]) {
         }
         seg.push(q);
         coachPace(s, seg, q.t);
+        stepWorkout(s, q.t);
         const km = Math.floor((s.distanceM ?? 0) / 1000);
         if (km > (s.lastCueKm ?? 0)) {
           s.lastCueKm = km;
@@ -120,7 +142,7 @@ export function ingest(locations: Location.LocationObject[]) {
         if (settings.voiceCues) Speech.speak('Auto paused');
       }
     }
-    if (session) await persist();
+    if (session) await (session.status !== statusBefore ? persist() : persistSoon());
     notify();
   });
 }
@@ -134,6 +156,24 @@ function coachPace(s: Session, seg: Point[], now: number) {
   if (!advice) return;
   s.lastPaceAlertAt = now;
   Speech.speak(advice === 'faster' ? 'Pick up the pace' : 'Ease off a little, you are ahead of target');
+}
+
+function stepWorkout(s: Session, now: number) {
+  const w = findWorkout(s.workout?.workoutId);
+  if (!w || !s.workout || s.status !== 'recording') return false;
+  const r = advance(w, s.workout, s.distanceM ?? 0, sessionMovingSec(s, now));
+  if (!r.changed) return false;
+  s.workout = r.p;
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
+  Speech.speak(stepCue(w, r.p)); // workout cues always speak: they are the point of the feature
+  return true;
+}
+
+/** Time-based interval steps also need checking when no new GPS fix arrives (e.g. standing rest). */
+export function workoutTick() {
+  return locked(async () => {
+    if (session && stepWorkout(session, Date.now())) { await persist(); notify(); }
+  });
 }
 
 /** Current pace/speed from the last 30 s of movement (m/s). */
@@ -205,6 +245,8 @@ async function startUpdates(sport: Sport) {
         ...opts,
         activityType: Location.ActivityType.Fitness,
         pausesUpdatesAutomatically: false,
+        // battery saver: let the OS batch fixes and wake the JS runtime less often
+        deferredUpdatesInterval: settings.gpsMode === 'saver' ? 10_000 : 0,
         showsBackgroundLocationIndicator: true,
         foregroundService: {
           notificationTitle: 'Stride is recording',
@@ -240,17 +282,21 @@ export async function warmUp(): Promise<Location.LocationSubscription | null> {
   } catch { return null; }
 }
 
-export async function start(sport: Sport) {
+export async function start(sport: Sport, workoutId?: string | null) {
   await refreshSettings();
   await locked(async () => {
     await load();
     session = {
       sport, startedAt: Date.now(), status: 'recording',
-      pausedMs: 0, pauseStartedAt: null, distanceM: 0, lastCueKm: 0, segments: [lastFix && (lastFix.acc ?? 99) <= 35 ? [{ ...lastFix, t: Date.now() }] : []],
+      pausedMs: 0, pauseStartedAt: null, distanceM: 0, lastCueKm: 0,
+      workout: findWorkout(workoutId) ? startProgress(workoutId!, 0, 0) : null,
+      segments: [lastFix && (lastFix.acc ?? 99) <= 35 ? [{ ...lastFix, t: Date.now() }] : []],
     };
     await persist();
   });
   await startUpdates(sport);
+  const w = findWorkout(workoutId);
+  if (w && session?.workout) Speech.speak(`${w.name}. ${stepCue(w, session.workout)}`);
   notify();
 }
 
@@ -310,6 +356,7 @@ export async function finish(): Promise<Activity | null> {
       gearId: gear?.id,
       laps: s.laps?.length ? lapsFromMarks(s.laps, distanceM, movingSec) : undefined,
       maxSpeedMs: s.maxSpeedMs,
+      workoutName: findWorkout(s.workout?.workoutId)?.name,
     };
     session = null;
     await persist();

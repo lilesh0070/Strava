@@ -42,9 +42,11 @@ export default function ActivityCard({ a }: { a: Activity }) {
           : <Stat label="Speed" value={fmtSpeed(a.distanceM, a.movingSec)} unit="km/h" />}
         <Stat label="Time" value={fmtDuration(a.movingSec)} />
       </View>
-      <NeuCard inset radius={20} padding={4}>
-        <RouteThumb segments={a.segments} width={width - 80} height={140} />
-      </NeuCard>
+      {a.segments.some((g) => g.length > 1) ? (
+        <NeuCard inset radius={20} padding={4}>
+          <RouteThumb segments={a.segments} width={width - 80} height={140} />
+        </NeuCard>
+      ) : a.manual ? <Text style={{ color: C.muted, fontSize: 12 }}>Added manually</Text> : null}
     </Pressable>
   );
 }
