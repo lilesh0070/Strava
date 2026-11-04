@@ -10,6 +10,11 @@ An original GPS activity tracker for Android and iOS, built with React Native an
 - **Maps.** Uses Leaflet with OpenStreetMap tiles, so no API key is needed.
 - **Feed.** A weekly summary plus activity cards with route previews.
 - **Activity detail.** Route map, moving/elapsed time, elevation gain and profile, per-km splits, rename and delete.
+- **Voice updates.** Announces time and pace (or speed) at every kilometre.
+- **Auto-pause.** Optional. Pauses when you stop moving and resumes when you set off again.
+- **Notes, effort and gear.** Add notes and a 1–10 effort rating to any activity, and track the distance on your shoes or bikes.
+- **GPX export.** Share any activity as a `.gpx` file (works with other fitness apps and Google Earth).
+- **Streak and calendar.** A weekly activity streak plus a month calendar showing your active days.
 - **Profile.** An 8-week distance chart with a weekly goal, all-time totals, and running best efforts (1k / 5k / 10k / half).
 
 All data is stored on the device with AsyncStorage.
@@ -48,15 +53,16 @@ src/app/                 Expo Router screens
   activity/[id].tsx      Activity detail
 src/components/          RouteMap (Leaflet WebView), RouteThumb (SVG), charts
 src/lib/geo.ts           Distance, splits, elevation, best-effort maths (unit-tested)
+src/lib/coach.ts         Voice cues, auto-pause rules, GPX, streaks (unit-tested)
 src/lib/tracker.ts       Location task + recording state machine
 src/lib/storage.ts       Activity persistence
 ```
 
 ## Scripts
 
-- `npm test`: unit tests for the geo maths
+- `npm test`: unit tests for the geo maths and coach helpers
 - `npm run typecheck`
 
 ## Roadmap ideas
 
-Cloud sync and login (Firebase/Supabase), followers and kudos, segments and leaderboards, GPX export, heart-rate sensors over BLE.
+Cloud sync and login (Firebase/Supabase), followers and kudos, segments and leaderboards, GPX import, heart-rate sensors over BLE.

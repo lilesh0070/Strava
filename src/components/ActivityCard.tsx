@@ -33,6 +33,7 @@ export default function ActivityCard({ a }: { a: Activity }) {
           <Text style={{ color: C.muted, fontSize: 12 }}>{fmtDate(a.startedAt)}</Text>
         </View>
       </View>
+      {a.description ? <Text style={{ color: C.text, marginBottom: 10 }} numberOfLines={3}>{a.description}</Text> : null}
       <View style={{ flexDirection: 'row', marginBottom: 12 }}>
         <Stat label="Distance" value={fmtKm(a.distanceM)} unit="km" />
         {info.usesPace

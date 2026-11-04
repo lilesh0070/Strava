@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
+import CalendarCard from '../../components/CalendarCard';
+import GearCard from '../../components/GearCard';
+import SettingsCard from '../../components/SettingsCard';
 import Stat from '../../components/Stat';
 import { bestEffort, fmtDuration, fmtKm } from '../../lib/geo';
 import { getProfile, saveProfile, type Profile } from '../../lib/storage';
@@ -81,6 +84,8 @@ export default function ProfileScreen() {
           placeholderTextColor={C.muted} style={[F.h1, { flex: 1 }]} />
       </View>
 
+      <CalendarCard activities={items ?? []} />
+
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {SPORTS.map((s) => (
           <Pressable key={s.key} onPress={() => setFilter(s.key)}
@@ -145,6 +150,8 @@ export default function ProfileScreen() {
           ))}
         </View>
       )}
+      <GearCard activities={items ?? []} />
+      <SettingsCard />
     </ScrollView>
   );
 }

@@ -3,11 +3,13 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { fmtDate } from '../../components/ActivityCard';
+import DetailsCard from '../../components/DetailsCard';
 import ElevationChart from '../../components/ElevationChart';
 import RouteMap from '../../components/RouteMap';
 import Stat from '../../components/Stat';
 import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, splits } from '../../lib/geo';
 import { deleteActivity, getActivity, saveActivity } from '../../lib/storage';
+import { shareGpx } from '../../lib/exportGpx';
 import { C, F } from '../../lib/theme';
 import { sportInfo, type Activity } from '../../lib/types';
 
@@ -36,6 +38,10 @@ export default function ActivityDetail() {
     setA(next); setEditing(false);
   };
 
+  const update = async (next: Activity) => { setA(next); await saveActivity(next); };
+
+  const onExport = () => shareGpx(a).catch((e) => Alert.alert('Export failed', String(e?.message ?? e)));
+
   const onDelete = () => Alert.alert('Delete activity?', 'This cannot be undone.', [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: async () => { await deleteActivity(a.id); router.back(); } },
@@ -46,9 +52,14 @@ export default function ActivityDetail() {
       <Stack.Screen options={{
         title: info.label,
         headerRight: () => (
-          <Pressable onPress={onDelete} hitSlop={10}>
-            <MaterialCommunityIcons name="trash-can-outline" size={22} color={C.danger} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 20 }}>
+            <Pressable onPress={onExport} hitSlop={10} accessibilityLabel="Export GPX">
+              <MaterialCommunityIcons name="export-variant" size={22} color={C.text} />
+            </Pressable>
+            <Pressable onPress={onDelete} hitSlop={10} accessibilityLabel="Delete">
+              <MaterialCommunityIcons name="trash-can-outline" size={22} color={C.danger} />
+            </Pressable>
+          </View>
         ),
       }} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -83,6 +94,8 @@ export default function ActivityDetail() {
               <Stat label="Max elev" value={Number.isFinite(maxAlt) ? String(Math.round(maxAlt)) : '–'} unit="m" />
             </View>
           </View>
+
+          <DetailsCard a={a} onChange={update} />
 
           {data.cum.alt.some((x) => x != null) && (
             <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 10 }}>

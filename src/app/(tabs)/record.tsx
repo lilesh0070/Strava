@@ -111,7 +111,11 @@ export default function Record() {
                 ? <Stat big label="Avg pace" value={fmtPace(dist, moving)} unit="/km" />
                 : <Stat big label="Avg speed" value={fmtSpeed(dist, moving)} unit="km/h" />}
             </View>
-            {active.status === 'paused' && <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '700' }}>PAUSED</Text>}
+            {active.status === 'paused' && (
+              <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '700' }}>
+                {active.autoPaused ? 'AUTO-PAUSED · start moving to resume' : 'PAUSED'}
+              </Text>
+            )}
             <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 20 }}>
               {active.status === 'recording' ? (
                 <RoundBtn icon="pause" onPress={() => { Haptics.selectionAsync(); tracker.pause(); }} />

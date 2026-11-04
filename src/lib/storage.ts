@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Activity } from './types';
+import type { Activity, Gear, GearKind, Settings } from './types';
 
 const INDEX = 'stride:activities';
 const item = (id: string) => `stride:activity:${id}`;
@@ -47,6 +47,31 @@ export async function deleteActivity(id: string): Promise<void> {
   await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
   await AsyncStorage.removeItem(item(id));
   emit();
+}
+
+// ---------- settings ----------
+const SETTINGS = 'stride:settings';
+export async function getSettings(): Promise<Settings> {
+  const raw = await AsyncStorage.getItem(SETTINGS);
+  return { voiceCues: true, autoPause: false, ...(raw ? JSON.parse(raw) : {}) };
+}
+export async function saveSettings(s: Settings): Promise<void> {
+  await AsyncStorage.setItem(SETTINGS, JSON.stringify(s));
+  emit();
+}
+
+// ---------- gear ----------
+const GEAR = 'stride:gear';
+export async function listGear(): Promise<Gear[]> {
+  const raw = await AsyncStorage.getItem(GEAR);
+  return raw ? JSON.parse(raw) : [];
+}
+export async function saveGearList(list: Gear[]): Promise<void> {
+  await AsyncStorage.setItem(GEAR, JSON.stringify(list));
+  emit();
+}
+export async function defaultGear(kind: GearKind): Promise<Gear | undefined> {
+  return (await listGear()).find((g) => g.kind === kind && g.isDefault && !g.retired);
 }
 
 export async function getProfile(): Promise<Profile> {

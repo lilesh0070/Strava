@@ -22,15 +22,26 @@ export type Activity = {
   distanceM: number;
   elevGainM: number;
   segments: Point[][];
+  effort?: number; // 1-10 perceived exertion
+  gearId?: string;
 };
+
+export type GearKind = 'shoes' | 'bike';
+export type Gear = { id: string; name: string; kind: GearKind; isDefault?: boolean; retired?: boolean };
+export const gearKindFor = (s: Sport): GearKind => (s === 'ride' ? 'bike' : 'shoes');
+
+export type Settings = { voiceCues: boolean; autoPause: boolean };
 
 export type Session = {
   sport: Sport;
   startedAt: number;
   status: 'recording' | 'paused';
+  autoPaused?: boolean;
   pausedMs: number;
   pauseStartedAt: number | null;
   segments: Point[][];
+  distanceM?: number; // running total, kept incrementally
+  lastCueKm?: number;
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {

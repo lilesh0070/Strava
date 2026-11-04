@@ -4,9 +4,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { acceptPoint, elevationGain, totalDistance, type Point } from './geo';
-import { defaultName, sessionMovingSec, type Activity, type Session, type Sport } from './types';
-import { saveActivity } from './storage';
+import * as Speech from 'expo-speech';
+import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
+import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
+import { defaultGear, getSettings, saveActivity } from './storage';
+import {
+  defaultName, gearKindFor, sessionMovingSec, sportInfo,
+  type Activity, type Session, type Settings, type Sport,
+} from './types';
 
 export const LOCATION_TASK = 'stride-location-task';
 const SESSION_KEY = 'stride:session';
@@ -15,6 +20,11 @@ let session: Session | null = null;
 let loaded = false;
 let watcher: Location.LocationSubscription | null = null;
 let lastFix: Point | null = null;
+let settings: Settings = { voiceCues: true, autoPause: false };
+const refreshSettings = () => getSettings().then((x) => { settings = x; }).catch(() => undefined);
+refreshSettings();
+export const getSettingsCache = () => settings;
+export { refreshSettings };
 const listeners = new Set<() => void>();
 
 // Serialise all mutations so the background task and UI never clobber each other.
@@ -60,9 +70,38 @@ export function ingest(locations: Location.LocationObject[]) {
     for (const l of locations) {
       const p = toPoint(l);
       lastFix = p;
-      if (!session || session.status !== 'recording') continue;
-      const seg = session.segments[session.segments.length - 1];
-      if (acceptPoint(seg[seg.length - 1], p, session.sport === 'ride' ? 45 : 12)) seg.push(p);
+      if (!session) continue;
+      const s = session;
+      const seg = s.segments[s.segments.length - 1];
+      const last = seg[seg.length - 1] ?? s.segments.flat().at(-1);
+
+      if (s.status === 'paused') {
+        // auto-resume once the athlete clearly moves away from where they stopped
+        if (s.autoPaused && last && (p.acc ?? 99) <= 35 && haversine(last, p) >= AUTO_RESUME_DIST_M) {
+          s.pausedMs += p.t - (s.pauseStartedAt ?? p.t);
+          s.pauseStartedAt = null;
+          s.status = 'recording';
+          s.autoPaused = false;
+          s.segments.push([p]);
+          if (settings.voiceCues) Speech.speak('Resumed');
+        }
+        continue;
+      }
+
+      if (acceptPoint(seg[seg.length - 1], p, s.sport === 'ride' ? 45 : 12)) {
+        if (seg.length) s.distanceM = (s.distanceM ?? 0) + haversine(seg[seg.length - 1], p);
+        seg.push(p);
+        const km = Math.floor((s.distanceM ?? 0) / 1000);
+        if (km > (s.lastCueKm ?? 0)) {
+          s.lastCueKm = km;
+          if (settings.voiceCues) Speech.speak(kmCue(km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace));
+        }
+      } else if (settings.autoPause && shouldAutoPause(last?.t ?? s.startedAt, p.t) && (s.distanceM ?? 0) > 0) {
+        s.status = 'paused';
+        s.autoPaused = true;
+        s.pauseStartedAt = last?.t ?? p.t;
+        if (settings.voiceCues) Speech.speak('Auto paused');
+      }
     }
     if (session) await persist();
     notify();
@@ -103,7 +142,7 @@ async function startUpdates(sport: Sport) {
   const opts: Location.LocationOptions = {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 1000,
-    distanceInterval: sport === 'ride' ? 5 : 2,
+    distanceInterval: settings.autoPause ? 0 : sport === 'ride' ? 5 : 2,
   };
   const bg = await Location.getBackgroundPermissionsAsync().catch(() => null);
   if (bg?.status === 'granted') {
@@ -148,11 +187,12 @@ export async function warmUp(): Promise<Location.LocationSubscription | null> {
 }
 
 export async function start(sport: Sport) {
+  await refreshSettings();
   await locked(async () => {
     await load();
     session = {
       sport, startedAt: Date.now(), status: 'recording',
-      pausedMs: 0, pauseStartedAt: null, segments: [lastFix && (lastFix.acc ?? 99) <= 35 ? [{ ...lastFix, t: Date.now() }] : []],
+      pausedMs: 0, pauseStartedAt: null, distanceM: 0, lastCueKm: 0, segments: [lastFix && (lastFix.acc ?? 99) <= 35 ? [{ ...lastFix, t: Date.now() }] : []],
     };
     await persist();
   });
@@ -164,6 +204,7 @@ export function pause() {
   return locked(async () => {
     if (!session || session.status !== 'recording') return;
     session.status = 'paused';
+    session.autoPaused = false;
     session.pauseStartedAt = Date.now();
     await persist();
     notify();
@@ -176,6 +217,7 @@ export function resume() {
     session.pausedMs += Date.now() - (session.pauseStartedAt ?? Date.now());
     session.pauseStartedAt = null;
     session.status = 'recording';
+    session.autoPaused = false;
     session.segments.push([]);
     await persist();
     notify();
@@ -183,13 +225,16 @@ export function resume() {
 }
 
 export async function discard() {
+  Speech.stop();
   await stopUpdates();
   await locked(async () => { session = null; await persist(); });
   notify();
 }
 
 export async function finish(): Promise<Activity | null> {
+  Speech.stop();
   await stopUpdates();
+  const gear = session ? await defaultGear(gearKindFor(session.sport)).catch(() => undefined) : undefined;
   const activity = await locked(async () => {
     if (!session) return null;
     const s = session;
@@ -205,6 +250,7 @@ export async function finish(): Promise<Activity | null> {
       distanceM: totalDistance(segments),
       elevGainM: Math.round(elevationGain(segments)),
       segments,
+      gearId: gear?.id,
     };
     session = null;
     await persist();
