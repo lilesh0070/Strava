@@ -44,42 +44,49 @@ The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is 
   - No UI or map work while the screen is off.
   - GPS fixes rounded and batched in battery-saver mode.
   - Crash screen that keeps your data safe.
+- **Personal records.** Fastest 1k/5k/10k/half, longest, biggest climb. Shown as 🏆 chips and in a pop-up when you beat one.
+- **Weekly insights.** This week vs the same point last week (km, time, % change).
+- **Monthly goal ring** on the You tab.
+- **Share as image.** A neumorphic activity card as a PNG for WhatsApp, Instagram, etc.
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports merge with existing data and never delete anything.
 
 All data is stored on the device with AsyncStorage.
 
-## Releasing an update
+## Releasing an update (all on GitHub)
 
-1. Set up once:
-   - Run `npx eas-cli@latest init` and `npx eas-cli@latest update:configure` (this links the EAS project and enables OTA).
-   - Add an `EXPO_TOKEN` repo secret.
-2. **Small JS/UI fix:** run `npx eas-cli@latest update --channel preview -m "what changed"`. Users get it on their next launch.
-3. **New native version:** bump `version` (and `android.versionCode`) in `app.json`, commit, then run `git tag v1.2.0 && git push --tags`. The `Release APK` workflow builds the APK on EAS and attaches it to a GitHub Release. The app's **Check for updates** then offers it.
+Everything runs on GitHub. No Expo account and no computer are needed, and it works from the GitHub mobile app.
 
-## Run it
+1. Open **GitHub → Actions → Release APK → Run workflow**.
+2. Type the new version (e.g. `1.2.0`) and, optionally, release notes.
+3. The workflow then does the rest:
+   - runs the tests;
+   - bumps `app.json`, then commits and tags;
+   - generates the Android project and builds the APK with Gradle;
+   - publishes a **GitHub Release** with `stride-v1.2.0.apk` attached.
+4. On the phone, **Settings → Check for updates** finds the release, downloads the APK with a progress bar and opens the installer.
 
-```bash
-npm install
-npx expo start
-```
+Pushing a tag (`git tag v1.2.0 && git push --tags`) does the same.
 
-Background location and the WebView map need a **development build**, because Expo Go is not enough:
+**Signing.** By default the APK is signed with the standard React Native debug key. It is identical on every build, so updates install over each other.
 
-```bash
-npx expo run:android            # local, needs Android SDK
-# or build in the cloud:
-npx eas-cli@latest build -p android --profile development
-```
+To use your own key, add these repo secrets:
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
-### Build an installable APK
+After switching keys, uninstall the old app once.
 
-```bash
-npx eas-cli@latest login
-npx eas-cli@latest build -p android --profile preview
-```
+Optional: OTA JS updates via `eas update` still work if you set up EAS, but nothing requires it.
 
-EAS gives you a download link for the `.apk`.
+## GitHub cloud backup
+
+**Settings → GitHub cloud backup** stores all activities in a **secret Gist** on your own GitHub account:
+- It needs a token with only the `gist` permission.
+- The token is kept in the phone's encrypted keystore.
+- It backs up automatically after every activity.
+- **Restore** merges the backup into a new phone.
 
 ## Project layout
 
@@ -96,6 +103,10 @@ src/lib/coach.ts         Voice cues, auto-pause rules, GPX, streaks (unit-tested
 src/lib/tracker.ts       Location task + recording state machine
 src/lib/storage.ts       Activity persistence
 src/lib/updates.ts       OTA + GitHub-release APK updater
+src/lib/githubSync.ts    Secret-Gist cloud backup
+src/lib/records.ts       PRs and weekly insights (unit-tested)
+plugins/withReleaseSigning.js  Release signing from CI secrets
+.github/workflows/release.yml  GitHub-only APK build + release
 src/lib/theme.tsx        Neumorphic light/dark theme
 src/components/Neu.tsx   NeuCard, NeuButton, NeuSwitch, IconWell, NeuTile…
 ```

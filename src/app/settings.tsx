@@ -5,6 +5,7 @@ import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress, NeuSegmented,
 import { parsePace } from '../lib/live';
 import { setDailyReminder } from '../lib/reminders';
 import { fmtDuration } from '../lib/geo';
+import GithubSyncCard from '../components/GithubSyncCard';
 import { exportBackup, importBackup, storageBytes } from '../lib/backup';
 import { getSettings, saveSettings } from '../lib/storage';
 import { useTheme } from '../lib/theme';
@@ -186,6 +187,7 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title="Your data">
+        <GithubSyncCard />
         <NeuTile icon="cloud-upload-outline" title="Back up" subtitle="Save all activities, gear and settings to a file"
           onPress={() => exportBackup().catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
         <NeuTile icon="cloud-download-outline" title="Restore" subtitle="Import a Stride backup file (merges, nothing is deleted)"

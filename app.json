@@ -51,7 +51,9 @@
         }
       ],
       "expo-sharing",
-      "expo-notifications"
+      "expo-notifications",
+      "./plugins/withReleaseSigning",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": false

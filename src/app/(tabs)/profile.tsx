@@ -6,6 +6,8 @@ import GearCard from '../../components/GearCard';
 import { router } from 'expo-router';
 import { IconWell, NeuButton, NeuCard, NeuProgress, NeuTile } from '../../components/Neu';
 import { evaluateAchievements } from '../../lib/achievements';
+import GoalRing from '../../components/GoalRing';
+import { monthKm } from '../../lib/records';
 import Stat from '../../components/Stat';
 import { bestEffort, fmtDuration, fmtKm } from '../../lib/geo';
 import { getProfile, saveProfile, type Profile } from '../../lib/storage';
@@ -97,6 +99,22 @@ export default function ProfileScreen() {
         <NeuTile icon="map-legend" title="Heatmap" subtitle="All routes"
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/heatmap')} />
       </View>
+
+      <NeuCard radius={28} style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+        <GoalRing value={profile?.monthlyGoalKm ? monthKm(items ?? []) / profile.monthlyGoalKm : 0}
+          label={`${monthKm(items ?? []).toFixed(0)}`} sub={`of ${profile?.monthlyGoalKm ?? 0} km`} />
+        <View style={{ flex: 1, gap: 8 }}>
+          <Text style={F.h2}>{new Date().toLocaleDateString(undefined, { month: 'long' })} goal</Text>
+          <Text style={{ color: C.muted, fontSize: 12 }}>All sports combined</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TextInput keyboardType="numeric" value={String(profile?.monthlyGoalKm ?? '')} accessibilityLabel="Monthly goal in kilometres"
+              onChangeText={(t) => update({ monthlyGoalKm: Math.max(0, Number(t.replace(/[^0-9.]/g, '')) || 0) })}
+              style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 12,
+                paddingVertical: 6, minWidth: 64, textAlign: 'center', fontWeight: '700' }} />
+            <Text style={{ color: C.muted }}>km</Text>
+          </View>
+        </View>
+      </NeuCard>
 
       <CalendarCard activities={items ?? []} />
 

@@ -11,6 +11,7 @@ import Stat from '../../components/Stat';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed, totalDistance } from '../../lib/geo';
 import { gpsHealth, lapsFromMarks } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
+import { newRecords } from '../../lib/records';
 import { getSettings, listActivities } from '../../lib/storage';
 import { useSelectedWorkout } from '../../lib/workoutSelection';
 import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
@@ -130,8 +131,11 @@ export default function Record() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
           if (!a) return;
           router.push(`/activity/${a.id}`);
-          const badges = newlyEarned(before, a);
-          if (badges.length) Alert.alert('New badge!', badges.map((b) => `🏅 ${b.title} — ${b.detail}`).join('\n'));
+          const lines = [
+            ...newRecords(before, a).map((r) => `🏆 New PR: ${r.label}${r.kind === 'effort' ? ` — ${fmtDuration(r.value)}` : ''}`),
+            ...newlyEarned(before, a).map((b) => `🏅 Badge: ${b.title}`),
+          ];
+          if (lines.length) Alert.alert('Nice work!', lines.join('\n'));
         },
       },
     ]);

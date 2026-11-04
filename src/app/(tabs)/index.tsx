@@ -4,16 +4,11 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import ActivityCard from '../../components/ActivityCard';
 import { IconWell, NeuButton, NeuCard } from '../../components/Neu';
-import { fmtKm } from '../../lib/geo';
+import { fmtDuration, fmtKm } from '../../lib/geo';
+import { compareWeeks } from '../../lib/records';
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
-
-function startOfWeek(d = new Date()) {
-  const x = new Date(d); x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // Monday
-  return x.getTime();
-}
 
 export default function Feed() {
   const { C, S, F } = useTheme();
@@ -31,17 +26,19 @@ export default function Feed() {
 
   if (!items) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
 
-  const weekStart = startOfWeek();
-  const week = items.filter((a) => a.startedAt >= weekStart);
-  const weekDist = week.reduce((s, a) => s + a.distanceM, 0);
+  const cmp = compareWeeks(items);
+  const trend = cmp.changePct == null ? null : cmp.changePct;
 
   const header = items.length ? (
     <View style={{ gap: 22, marginBottom: 22 }}>
       <NeuCard style={{ marginHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 14 }} radius={28}>
-        <IconWell icon="calendar-week" size={52} />
-        <View style={{ flex: 1, gap: 6 }}>
-          <Text style={F.label}>This week · {week.length} activities</Text>
-          <Text style={{ color: C.text, fontSize: 26, fontWeight: '800' }}>{fmtKm(weekDist)} km</Text>
+        <IconWell icon={trend != null && trend < 0 ? 'trending-down' : 'trending-up'} size={52} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={F.label}>This week · {cmp.thisCount} activities · {fmtDuration(cmp.thisSec)}</Text>
+          <Text style={{ color: C.text, fontSize: 26, fontWeight: '800' }}>{cmp.thisKm.toFixed(1)} km</Text>
+          <Text style={{ color: trend == null ? C.muted : trend >= 0 ? C.success : C.danger, fontSize: 12, fontWeight: '700' }}>
+            {trend == null ? 'Nothing at this point last week' : `${trend >= 0 ? '▲' : '▼'} ${Math.abs(trend)}% vs this time last week (${cmp.lastKm.toFixed(1)} km)`}
+          </Text>
         </View>
       </NeuCard>
 

@@ -1,5 +1,10 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
+import ShareCard, { type ShareCardHandle } from '../../components/ShareCard';
+import { personalRecords } from '../../lib/records';
+import { useActivities } from '../../lib/useActivities';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { fmtDate } from '../../components/ActivityCard';
 import DetailsCard from '../../components/DetailsCard';
@@ -23,6 +28,9 @@ export default function ActivityDetail() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [weightKg, setWeightKg] = useState(70);
+  const shareRef = useRef<ShareCardHandle>(null);
+  const { items } = useActivities();
+  const prs = useMemo(() => [...personalRecords(items ?? []).values()].filter((r) => r.activityId === id && r.kind === 'effort'), [items, id]);
   useEffect(() => { getProfile().then((p) => setWeightKg(p.weightKg)); }, []);
 
   useEffect(() => { getActivity(id).then((x) => { setA(x); setName(x?.name ?? ''); }); }, [id]);
@@ -45,6 +53,13 @@ export default function ActivityDetail() {
 
   const update = async (next: Activity) => { setA(next); await saveActivity(next); };
 
+  const onShare = async () => {
+    try {
+      const uri = await captureRef(shareRef as unknown as Parameters<typeof captureRef>[0], { format: 'png', quality: 1, result: 'tmpfile' });
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share activity' });
+    } catch (e) { Alert.alert('Could not share', String((e as Error)?.message ?? e)); }
+  };
+
   const onExport = () => shareGpx(a).catch((e) => Alert.alert('Export failed', String(e?.message ?? e)));
 
   const onDelete = () => Alert.alert('Delete activity?', 'This cannot be undone.', [
@@ -58,7 +73,8 @@ export default function ActivityDetail() {
         title: info.label,
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, paddingVertical: 4, paddingRight: 4 }}>
-            <NeuIconButton icon="export-variant" size={38} accessibilityLabel="Export GPX" onPress={onExport} />
+            <NeuIconButton icon="share-variant" size={38} accessibilityLabel="Share as image" onPress={onShare} />
+            <NeuIconButton icon="file-export-outline" size={38} accessibilityLabel="Export GPX" onPress={onExport} />
             <NeuIconButton icon="trash-can-outline" size={38} color={C.danger} accessibilityLabel="Delete activity" onPress={onDelete} />
           </View>
         ),
@@ -83,6 +99,17 @@ export default function ActivityDetail() {
               </Pressable>
             )}
           </View>
+
+          {prs.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              {prs.map((r) => (
+                <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7,
+                  borderRadius: 999, backgroundColor: C.accent, boxShadow: S.glow }}>
+                  <Text style={{ color: C.accentText, fontWeight: '800', fontSize: 12 }}>🏆 {r.label} · {fmtDuration(r.value)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           <NeuCard radius={28} style={{ gap: 18 }}>
             <View style={{ flexDirection: 'row' }}>
@@ -175,6 +202,10 @@ export default function ActivityDetail() {
           )}
         </View>
       </ScrollView>
+      {/* rendered off-screen, only used as the source for the share image */}
+      <View style={{ position: 'absolute', left: -10000, top: 0 }} pointerEvents="none">
+        <ShareCard ref={shareRef} a={a} />
+      </View>
     </>
   );
 }

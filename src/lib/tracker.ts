@@ -11,6 +11,7 @@ import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
 import { expectedSpeed, kalmanStep, lapsFromMarks, paceAdvice, rollingSpeed } from './live';
+import { autoSync } from './githubSync';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
   DEFAULT_SETTINGS, defaultName, gearKindFor, sessionMovingSec, sportInfo,
@@ -362,7 +363,7 @@ export async function finish(): Promise<Activity | null> {
     await persist();
     return a;
   });
-  if (activity) await saveActivity(activity);
+  if (activity) { await saveActivity(activity); autoSync(); }
   notify();
   return activity;
 }

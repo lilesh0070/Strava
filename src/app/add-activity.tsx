@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, View } from 'react-native';
 import { NeuButton, NeuCard, NeuIconButton } from '../components/Neu';
+import { autoSync } from '../lib/githubSync';
 import { parseDuration } from '../lib/parse';
 import { defaultGear, saveActivity } from '../lib/storage';
 import { useTheme } from '../lib/theme';
@@ -36,6 +37,7 @@ export default function AddActivity() {
       distanceM: Math.round(km * 1000), elevGainM: 0, segments: [], manual: true, gearId: gear?.id,
     };
     await saveActivity(a);
+    autoSync();
     router.replace(`/activity/${a.id}`);
   };
 
