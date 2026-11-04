@@ -30,7 +30,19 @@ export type GearKind = 'shoes' | 'bike';
 export type Gear = { id: string; name: string; kind: GearKind; isDefault?: boolean; retired?: boolean };
 export const gearKindFor = (s: Sport): GearKind => (s === 'ride' ? 'bike' : 'shoes');
 
-export type Settings = { voiceCues: boolean; autoPause: boolean };
+export type ThemeChoice = 'system' | 'light' | 'dark';
+export type GpsMode = 'precise' | 'saver';
+export type Settings = {
+  voiceCues: boolean;
+  autoPause: boolean;
+  countdown: boolean;
+  theme: ThemeChoice;
+  gpsMode: GpsMode;
+  autoCheckUpdates: boolean;
+};
+export const DEFAULT_SETTINGS: Settings = {
+  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true,
+};
 
 export type Session = {
   sport: Sport;

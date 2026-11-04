@@ -1,14 +1,15 @@
 // Lightweight route preview drawn with SVG (cheap enough for long lists, unlike a WebView map).
 import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
 import type { Point } from '../lib/geo';
-import { C } from '../lib/theme';
+import { useTheme } from '../lib/theme';
 
 export default function RouteThumb({ segments, width, height }: { segments: Point[][]; width: number; height: number }) {
+  const { C } = useTheme();
   const pts = segments.flat();
   if (pts.length < 2) {
     return (
       <Svg width={width} height={height}>
-        <Rect width={width} height={height} rx={10} fill={C.cardAlt} />
+        <Rect width={width} height={height} rx={16} fill={C.bg} />
       </Svg>
     );
   }
@@ -23,13 +24,13 @@ export default function RouteThumb({ segments, width, height }: { segments: Poin
   const first = proj(pts[0]), last = proj(pts[pts.length - 1]);
   return (
     <Svg width={width} height={height}>
-      <Rect width={width} height={height} rx={10} fill={C.cardAlt} />
+      <Rect width={width} height={height} rx={16} fill={C.bg} />
       {segments.filter((s) => s.length > 1).map((s, i) => (
         <Polyline key={i} points={s.map((p) => proj(p).join(',')).join(' ')} fill="none"
           stroke={C.route} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
       ))}
-      <Circle cx={first[0]} cy={first[1]} r={4} fill="#22c55e" />
-      <Circle cx={last[0]} cy={last[1]} r={4} fill="#ef4444" />
+      <Circle cx={first[0]} cy={first[1]} r={4} fill={C.success} />
+      <Circle cx={last[0]} cy={last[1]} r={4} fill={C.danger} />
     </Svg>
   );
 }

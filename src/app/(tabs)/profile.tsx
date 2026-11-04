@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
 import CalendarCard from '../../components/CalendarCard';
 import GearCard from '../../components/GearCard';
-import SettingsCard from '../../components/SettingsCard';
+import { IconWell, NeuButton, NeuCard, NeuProgress } from '../../components/Neu';
 import Stat from '../../components/Stat';
 import { bestEffort, fmtDuration, fmtKm } from '../../lib/geo';
 import { getProfile, saveProfile, type Profile } from '../../lib/storage';
-import { C, F } from '../../lib/theme';
+import { useTheme } from '../../lib/theme';
 import { SPORTS, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
 
@@ -26,13 +26,14 @@ const EFFORTS = [
 ];
 
 export default function ProfileScreen() {
+  const { C, S, F } = useTheme();
   const { width } = useWindowDimensions();
   const { items } = useActivities();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [filter, setFilter] = useState<Sport>('run');
   useEffect(() => { getProfile().then(setProfile); }, []);
 
-  const acts = (items ?? []).filter((a) => a.sport === filter);
+  const acts = useMemo(() => (items ?? []).filter((a) => a.sport === filter), [items, filter]);
 
   const weeks = useMemo(() => {
     const thisMon = mondayOf(Date.now());
@@ -63,10 +64,11 @@ export default function ProfileScreen() {
     longest: acts.reduce((m, a) => Math.max(m, a.distanceM), 0),
   };
 
+  const goal = profile?.weeklyGoalKm ?? 0;
   const thisWeekKm = weeks[weeks.length - 1].km;
-  const chartW = width - 64, chartH = 120;
-  const maxKm = Math.max(...weeks.map((w) => w.km), profile?.weeklyGoalKm ?? 1, 1);
-  const barW = chartW / weeks.length - 8;
+  const chartW = width - 80, chartH = 120;
+  const maxKm = Math.max(...weeks.map((w) => w.km), goal, 1);
+  const barW = chartW / weeks.length - 10;
 
   const update = (p: Partial<Profile>) => {
     if (!profile) return;
@@ -75,57 +77,66 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontSize: 26, fontWeight: '800', color: C.accentText }}>{(profile?.name || 'A')[0].toUpperCase()}</Text>
+    <ScrollView contentContainerStyle={{ padding: 20, gap: 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <NeuCard radius={30} style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+        <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center', boxShadow: S.glow }}>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: C.accentText }}>{(profile?.name || 'A')[0].toUpperCase()}</Text>
         </View>
-        <TextInput value={profile?.name ?? ''} onChangeText={(name) => update({ name })} placeholder="Your name"
-          placeholderTextColor={C.muted} style={[F.h1, { flex: 1 }]} />
-      </View>
+        <View style={{ flex: 1 }}>
+          <TextInput value={profile?.name ?? ''} onChangeText={(name) => update({ name })} placeholder="Your name"
+            placeholderTextColor={C.muted} style={[F.h1, { fontSize: 24, padding: 0 }]} accessibilityLabel="Your name" />
+          <Text style={{ color: C.muted, fontSize: 13 }}>{(items ?? []).length} activities recorded</Text>
+        </View>
+      </NeuCard>
 
       <CalendarCard activities={items ?? []} />
 
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 8, gap: 12 }}>
         {SPORTS.map((s) => (
-          <Pressable key={s.key} onPress={() => setFilter(s.key)}
-            style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: filter === s.key ? C.accent : C.card }}>
-            <Text style={{ color: filter === s.key ? C.accentText : C.text, fontWeight: '700' }}>{s.label}</Text>
-          </Pressable>
+          <NeuButton key={s.key} small icon={s.icon as never} label={s.label} selected={filter === s.key} onPress={() => setFilter(s.key)} />
         ))}
-      </View>
+      </ScrollView>
 
-      <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 12 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <Text style={F.h2}>Last 8 weeks</Text>
-          <Text style={{ color: C.muted }}>{thisWeekKm.toFixed(1)} / {profile?.weeklyGoalKm ?? 0} km goal</Text>
+      <NeuCard radius={28} style={{ gap: 14 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <IconWell icon="chart-bar" />
+          <View style={{ flex: 1 }}>
+            <Text style={F.h2}>Last 8 weeks</Text>
+            <Text style={{ color: C.muted, fontSize: 13 }}>{thisWeekKm.toFixed(1)} of {goal} km this week</Text>
+          </View>
         </View>
+        <NeuProgress value={goal ? thisWeekKm / goal : 0} />
         <Svg width={chartW} height={chartH + 18}>
-          {profile && (
-            <Rect x={0} y={chartH - (profile.weeklyGoalKm / maxKm) * chartH} width={chartW} height={1} fill={C.accent} opacity={0.6} />
+          {goal > 0 && (
+            <Rect x={0} y={chartH - (goal / maxKm) * chartH} width={chartW} height={1.5} fill={C.accent} opacity={0.5} />
           )}
           {weeks.map((w, i) => {
-            const h = Math.max(2, (w.km / maxKm) * chartH);
+            const h = Math.max(3, (w.km / maxKm) * chartH);
             const d = new Date(w.start);
             return [
-              <Rect key={`b${i}`} x={i * (barW + 8) + 4} y={chartH - h} width={barW} height={h} rx={4}
-                fill={i === weeks.length - 1 ? C.accent : C.route} />,
-              <SvgText key={`t${i}`} x={i * (barW + 8) + 4 + barW / 2} y={chartH + 14} fontSize={9} fill={C.muted} textAnchor="middle">
+              <Rect key={`b${i}`} x={i * (barW + 10) + 5} y={chartH - h} width={barW} height={h} rx={barW / 2.5}
+                fill={i === weeks.length - 1 ? C.accent : C.faint} />,
+              <SvgText key={`t${i}`} x={i * (barW + 10) + 5 + barW / 2} y={chartH + 14} fontSize={9} fill={C.muted} textAnchor="middle">
                 {`${d.getDate()}/${d.getMonth() + 1}`}
               </SvgText>,
             ];
           })}
         </Svg>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ color: C.muted }}>Weekly goal (km)</Text>
-          <TextInput keyboardType="numeric" value={String(profile?.weeklyGoalKm ?? '')}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text style={{ color: C.muted, flex: 1 }}>Weekly goal (km)</Text>
+          <TextInput keyboardType="numeric" value={String(profile?.weeklyGoalKm ?? '')} accessibilityLabel="Weekly goal in kilometres"
             onChangeText={(t) => update({ weeklyGoalKm: Math.max(0, Number(t.replace(/[^0-9.]/g, '')) || 0) })}
-            style={{ color: C.text, backgroundColor: C.cardAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, minWidth: 60 }} />
+            style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 14,
+              paddingVertical: 8, minWidth: 70, textAlign: 'center', fontWeight: '700' }} />
         </View>
-      </View>
+      </NeuCard>
 
-      <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 16 }}>
-        <Text style={F.h2}>All-time</Text>
+      <NeuCard radius={28} style={{ gap: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <IconWell icon="trophy-outline" />
+          <Text style={F.h2}>All-time</Text>
+        </View>
         <View style={{ flexDirection: 'row' }}>
           <Stat label="Activities" value={String(totals.count)} />
           <Stat label="Distance" value={fmtKm(totals.dist)} unit="km" />
@@ -135,23 +146,26 @@ export default function ProfileScreen() {
           <Stat label="Elev gain" value={String(totals.elev)} unit="m" />
         </View>
         <Stat label="Longest" value={fmtKm(totals.longest)} unit="km" />
-      </View>
+      </NeuCard>
 
       {records.length > 0 && (
-        <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 10 }}>
-          <Text style={F.h2}>Best efforts</Text>
+        <NeuCard radius={28} style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <IconWell icon="medal-outline" />
+            <Text style={F.h2}>Best efforts</Text>
+          </View>
           {records.map((r) => (
-            <View key={r.label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ color: C.text }}>{r.label}</Text>
-              <Text style={{ color: r.best ? C.accent : C.muted, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
+            <NeuCard key={r.label} inset radius={18} padding={12} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={{ color: C.text, fontWeight: '600' }}>{r.label}</Text>
+              <Text style={{ color: r.best ? C.accent : C.muted, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
                 {r.best ? fmtDuration(r.best) : '—'}
               </Text>
-            </View>
+            </NeuCard>
           ))}
-        </View>
+        </NeuCard>
       )}
+
       <GearCard activities={items ?? []} />
-      <SettingsCard />
     </ScrollView>
   );
 }

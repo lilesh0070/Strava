@@ -1,13 +1,14 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { weekStreak } from '../lib/coach';
-import { C, F } from '../lib/theme';
+import { useTheme } from '../lib/theme';
+import { IconWell, NeuCard, NeuIconButton } from './Neu';
 import type { Activity } from '../lib/types';
 
 const DOW = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 export default function CalendarCard({ activities }: { activities: Activity[] }) {
+  const { C, S, F } = useTheme();
   const [offset, setOffset] = useState(0); // months back from now
   const now = new Date();
   const month = new Date(now.getFullYear(), now.getMonth() - offset, 1);
@@ -26,25 +27,22 @@ export default function CalendarCard({ activities }: { activities: Activity[] })
   const cells = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
 
   return (
-    <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View>
+    <NeuCard radius={28} style={{ gap: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <IconWell icon="fire" color={streak ? C.accent : C.muted} />
+        <View style={{ flex: 1 }}>
           <Text style={F.h2}>{streak} week streak</Text>
           <Text style={{ color: C.muted, fontSize: 12 }}>Weeks in a row with at least one activity</Text>
         </View>
-        <MaterialCommunityIcons name="fire" size={30} color={streak ? C.accent : C.muted} />
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Pressable onPress={() => setOffset(offset + 1)} hitSlop={10}>
-          <MaterialCommunityIcons name="chevron-left" size={24} color={C.text} />
-        </Pressable>
-        <Text style={{ color: C.text, fontWeight: '700' }}>
+        <NeuIconButton icon="chevron-left" size={36} accessibilityLabel="Previous month" onPress={() => setOffset(offset + 1)} />
+        <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>
           {month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · {kmByDay.size} active days
         </Text>
-        <Pressable onPress={() => setOffset(Math.max(0, offset - 1))} hitSlop={10} disabled={offset === 0}>
-          <MaterialCommunityIcons name="chevron-right" size={24} color={offset === 0 ? C.border : C.text} />
-        </Pressable>
+        <NeuIconButton icon="chevron-right" size={36} accessibilityLabel="Next month" color={offset === 0 ? C.faint : C.text}
+          onPress={() => setOffset(Math.max(0, offset - 1))} />
       </View>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -56,12 +54,12 @@ export default function CalendarCard({ activities }: { activities: Activity[] })
           const size = km ? 18 + (km / maxKm) * 14 : 0;
           return (
             <View key={i} style={{ width: `${100 / 7}%`, height: 38, alignItems: 'center', justifyContent: 'center' }}>
-              {km ? <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, backgroundColor: C.accent, opacity: 0.9 }} /> : null}
+              {km ? <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, backgroundColor: C.accent, boxShadow: S.raisedSm }} /> : null}
               {day ? <Text style={{ color: km ? C.accentText : C.muted, fontSize: 12, fontWeight: km ? '800' : '400' }}>{day}</Text> : null}
             </View>
           );
         })}
       </View>
-    </View>
+    </NeuCard>
   );
 }

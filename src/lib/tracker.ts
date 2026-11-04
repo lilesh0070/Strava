@@ -4,12 +4,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
-  defaultName, gearKindFor, sessionMovingSec, sportInfo,
+  DEFAULT_SETTINGS, defaultName, gearKindFor, sessionMovingSec, sportInfo,
   type Activity, type Session, type Settings, type Sport,
 } from './types';
 
@@ -20,7 +21,7 @@ let session: Session | null = null;
 let loaded = false;
 let watcher: Location.LocationSubscription | null = null;
 let lastFix: Point | null = null;
-let settings: Settings = { voiceCues: true, autoPause: false };
+let settings: Settings = { ...DEFAULT_SETTINGS };
 const refreshSettings = () => getSettings().then((x) => { settings = x; }).catch(() => undefined);
 refreshSettings();
 export const getSettingsCache = () => settings;
@@ -94,6 +95,7 @@ export function ingest(locations: Location.LocationObject[]) {
         const km = Math.floor((s.distanceM ?? 0) / 1000);
         if (km > (s.lastCueKm ?? 0)) {
           s.lastCueKm = km;
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
           if (settings.voiceCues) Speech.speak(kmCue(km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace));
         }
       } else if (settings.autoPause && shouldAutoPause(last?.t ?? s.startedAt, p.t) && (s.distanceM ?? 0) > 0) {
@@ -140,8 +142,8 @@ export async function ensurePermissions(): Promise<PermissionResult> {
 
 async function startUpdates(sport: Sport) {
   const opts: Location.LocationOptions = {
-    accuracy: Location.Accuracy.BestForNavigation,
-    timeInterval: 1000,
+    accuracy: settings.gpsMode === 'saver' ? Location.Accuracy.High : Location.Accuracy.BestForNavigation,
+    timeInterval: settings.gpsMode === 'saver' ? 3000 : 1000,
     distanceInterval: settings.autoPause ? 0 : sport === 'ride' ? 5 : 2,
   };
   const bg = await Location.getBackgroundPermissionsAsync().catch(() => null);

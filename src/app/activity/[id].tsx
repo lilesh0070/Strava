@@ -1,4 +1,3 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -10,12 +9,14 @@ import Stat from '../../components/Stat';
 import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, splits } from '../../lib/geo';
 import { deleteActivity, getActivity, saveActivity } from '../../lib/storage';
 import { shareGpx } from '../../lib/exportGpx';
-import { C, F } from '../../lib/theme';
+import { useTheme } from '../../lib/theme';
+import { IconWell, NeuCard, NeuIconButton } from '../../components/Neu';
 import { sportInfo, type Activity } from '../../lib/types';
 
 export default function ActivityDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { width } = useWindowDimensions();
+  const { C, S, F } = useTheme();
   const [a, setA] = useState<Activity | null | undefined>(undefined);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -52,33 +53,32 @@ export default function ActivityDetail() {
       <Stack.Screen options={{
         title: info.label,
         headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 20 }}>
-            <Pressable onPress={onExport} hitSlop={10} accessibilityLabel="Export GPX">
-              <MaterialCommunityIcons name="export-variant" size={22} color={C.text} />
-            </Pressable>
-            <Pressable onPress={onDelete} hitSlop={10} accessibilityLabel="Delete">
-              <MaterialCommunityIcons name="trash-can-outline" size={22} color={C.danger} />
-            </Pressable>
+          <View style={{ flexDirection: 'row', gap: 14, paddingVertical: 4, paddingRight: 4 }}>
+            <NeuIconButton icon="export-variant" size={38} accessibilityLabel="Export GPX" onPress={onExport} />
+            <NeuIconButton icon="trash-can-outline" size={38} color={C.danger} accessibilityLabel="Delete activity" onPress={onDelete} />
           </View>
         ),
       }} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <RouteMap segments={a.segments} style={{ height: 300 }} />
-        <View style={{ padding: 16, gap: 20 }}>
+        <View style={{ margin: 20, marginBottom: 0, borderRadius: 30, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
+          <RouteMap segments={a.segments} style={{ height: 280, borderRadius: 24 }} />
+        </View>
+        <View style={{ padding: 20, gap: 24 }}>
           <View>
             <Text style={{ color: C.muted, fontSize: 13 }}>{fmtDate(a.startedAt)}</Text>
             {editing ? (
               <TextInput value={name} onChangeText={setName} autoFocus onSubmitEditing={saveName} onBlur={saveName}
-                style={[F.h1, { borderBottomWidth: 1, borderColor: C.accent, paddingVertical: 2 }]} />
+                style={[F.h1, { backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }]} />
             ) : (
-              <Pressable onPress={() => setEditing(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={F.h1}>{a.name}</Text>
-                <MaterialCommunityIcons name="pencil-outline" size={18} color={C.muted} />
+              <Pressable onPress={() => setEditing(true)} accessibilityRole="button" accessibilityHint="Rename"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <IconWell icon={info.icon as never} size={40} />
+                <Text style={[F.h1, { flex: 1 }]}>{a.name}</Text>
               </Pressable>
             )}
           </View>
 
-          <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 18 }}>
+          <NeuCard radius={28} style={{ gap: 18 }}>
             <View style={{ flexDirection: 'row' }}>
               <Stat label="Distance" value={fmtKm(a.distanceM)} unit="km" />
               {info.usesPace
@@ -93,20 +93,28 @@ export default function ActivityDetail() {
               <Stat label="Elev gain" value={String(a.elevGainM)} unit="m" />
               <Stat label="Max elev" value={Number.isFinite(maxAlt) ? String(Math.round(maxAlt)) : '–'} unit="m" />
             </View>
-          </View>
+          </NeuCard>
 
           <DetailsCard a={a} onChange={update} />
 
           {data.cum.alt.some((x) => x != null) && (
-            <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 10 }}>
-              <Text style={F.h2}>Elevation</Text>
-              <ElevationChart d={data.cum.d} alt={data.cum.alt} width={width - 64} height={110} />
-            </View>
+            <NeuCard radius={28} style={{ gap: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <IconWell icon="image-filter-hdr" />
+                <Text style={F.h2}>Elevation</Text>
+              </View>
+              <NeuCard inset radius={18} padding={8}>
+                <ElevationChart d={data.cum.d} alt={data.cum.alt} width={width - 88} height={110} />
+              </NeuCard>
+            </NeuCard>
           )}
 
           {data.splits.length > 0 && (
-            <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 8 }}>
-              <Text style={F.h2}>Splits</Text>
+            <NeuCard radius={28} style={{ gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+                <IconWell icon="format-list-numbered" />
+                <Text style={F.h2}>Splits</Text>
+              </View>
               <View style={{ flexDirection: 'row' }}>
                 <Text style={[F.label, { width: 40 }]}>Km</Text>
                 <Text style={[F.label, { width: 70 }]}>{info.usesPace ? 'Pace' : 'Speed'}</Text>
@@ -122,14 +130,14 @@ export default function ActivityDetail() {
                     <Text style={{ color: C.text, width: 70, fontVariant: ['tabular-nums'] }}>
                       {info.usesPace ? fmtPace(s.distanceM, s.durationSec) : fmtSpeed(s.distanceM, s.durationSec)}
                     </Text>
-                    <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: C.cardAlt }}>
-                      <View style={{ height: 10, borderRadius: 5, width: `${Math.max(8, (bestPerKm / perKm) * 100)}%`,
-                        backgroundColor: isBest ? C.accent : C.route }} />
+                    <View style={{ flex: 1, height: 14, borderRadius: 7, backgroundColor: C.bg, boxShadow: S.insetSm, padding: 3 }}>
+                      <View style={{ height: 8, borderRadius: 4, width: `${Math.max(8, (bestPerKm / perKm) * 100)}%`,
+                        backgroundColor: isBest ? C.accent : C.faint }} />
                     </View>
                   </View>
                 );
               })}
-            </View>
+            </NeuCard>
           )}
         </View>
       </ScrollView>

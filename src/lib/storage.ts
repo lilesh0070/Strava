@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Activity, Gear, GearKind, Settings } from './types';
+import { DEFAULT_SETTINGS, type Activity, type Gear, type GearKind, type Settings } from './types';
 
 const INDEX = 'stride:activities';
 const item = (id: string) => `stride:activity:${id}`;
@@ -9,6 +9,8 @@ export type Profile = { name: string; weeklyGoalKm: number };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
+/** Fires whenever activities, gear, settings or profile change. */
+export const onDataChanged = (fn: Listener) => onActivitiesChanged(fn);
 export function onActivitiesChanged(fn: Listener) {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
@@ -53,7 +55,7 @@ export async function deleteActivity(id: string): Promise<void> {
 const SETTINGS = 'stride:settings';
 export async function getSettings(): Promise<Settings> {
   const raw = await AsyncStorage.getItem(SETTINGS);
-  return { voiceCues: true, autoPause: false, ...(raw ? JSON.parse(raw) : {}) };
+  return { ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) };
 }
 export async function saveSettings(s: Settings): Promise<void> {
   await AsyncStorage.setItem(SETTINGS, JSON.stringify(s));

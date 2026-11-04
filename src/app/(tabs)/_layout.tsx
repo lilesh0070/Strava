@@ -1,28 +1,26 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router/js-tabs';
-import { C } from '../../lib/theme';
-
-type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
-const icon = (name: IconName) => ({ color, size }: { color: unknown; size: number }) => (
-  <MaterialCommunityIcons name={name} color={color as string} size={size} />
-);
+import NeuTabBar from '../../components/NeuTabBar';
+import SettingsButton from '../../components/SettingsButton';
+import { useTheme } from '../../lib/theme';
 
 export default function TabsLayout() {
+  const { C } = useTheme();
   return (
     <Tabs
+      tabBar={(props) => <NeuTabBar {...props} />}
       screenOptions={{
         headerStyle: { backgroundColor: C.bg },
+        headerShadowVisible: false,
         headerTintColor: C.text,
-        headerTitleStyle: { fontWeight: '800' },
-        tabBarStyle: { backgroundColor: C.card, borderTopColor: C.border },
-        tabBarActiveTintColor: C.accent,
-        tabBarInactiveTintColor: C.muted,
+        headerTitleStyle: { fontWeight: '800', fontSize: 26 },
+        headerTitleAlign: 'left',
+        headerRight: () => <SettingsButton />,
         sceneStyle: { backgroundColor: C.bg },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Feed', tabBarIcon: icon('home-variant') }} />
-      <Tabs.Screen name="record" options={{ title: 'Record', tabBarIcon: icon('record-circle'), headerShown: false }} />
-      <Tabs.Screen name="profile" options={{ title: 'You', tabBarIcon: icon('account-circle') }} />
+      <Tabs.Screen name="index" options={{ title: 'Feed' }} />
+      <Tabs.Screen name="record" options={{ title: 'Record', headerShown: false }} />
+      <Tabs.Screen name="profile" options={{ title: 'You' }} />
     </Tabs>
   );
 }

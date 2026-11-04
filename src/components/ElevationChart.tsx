@@ -1,7 +1,8 @@
 import Svg, { Path } from 'react-native-svg';
-import { C } from '../lib/theme';
+import { useTheme } from '../lib/theme';
 
 export default function ElevationChart({ d, alt, width, height }: { d: number[]; alt: (number | null)[]; width: number; height: number }) {
+  const { C } = useTheme();
   const pts = d.map((x, i) => [x, alt[i]] as const).filter((p): p is readonly [number, number] => p[1] != null);
   if (pts.length < 2) return null;
   const maxD = pts[pts.length - 1][0] || 1;
