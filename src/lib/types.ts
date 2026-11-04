@@ -1,4 +1,5 @@
 import type { Point } from './geo';
+import type { KalmanState, Lap, LapMark } from './live';
 
 export type Sport = 'run' | 'ride' | 'walk' | 'hike';
 
@@ -24,6 +25,8 @@ export type Activity = {
   segments: Point[][];
   effort?: number; // 1-10 perceived exertion
   gearId?: string;
+  laps?: Lap[];
+  maxSpeedMs?: number;
 };
 
 export type GearKind = 'shoes' | 'bike';
@@ -39,9 +42,10 @@ export type Settings = {
   theme: ThemeChoice;
   gpsMode: GpsMode;
   autoCheckUpdates: boolean;
+  targetPaceSec: number | null; // pace coach target (sec/km); null = off
 };
 export const DEFAULT_SETTINGS: Settings = {
-  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true,
+  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, targetPaceSec: null,
 };
 
 export type Session = {
@@ -54,6 +58,10 @@ export type Session = {
   segments: Point[][];
   distanceM?: number; // running total, kept incrementally
   lastCueKm?: number;
+  kf?: KalmanState | null; // smoothing filter state
+  laps?: LapMark[];
+  lastPaceAlertAt?: number;
+  maxSpeedMs?: number;
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {

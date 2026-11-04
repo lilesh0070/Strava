@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, Text, View } from 'react-native';
+import * as IntentLauncher from 'expo-intent-launcher';
+import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { IconWell, NeuButton, NeuCard, NeuProgress, NeuSegmented, NeuSwitch, NeuTile } from '../components/Neu';
+import { parsePace } from '../lib/live';
+import { fmtDuration } from '../lib/geo';
 import { exportBackup, importBackup, storageBytes } from '../lib/backup';
 import { getSettings, saveSettings } from '../lib/storage';
 import { useTheme } from '../lib/theme';
@@ -19,12 +22,16 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export default function SettingsScreen() {
-  const { C, F } = useTheme();
+  const { C, S, F } = useTheme();
+  const [paceText, setPaceText] = useState('');
   const [s, setS] = useState<Settings | null>(null);
   const [bytes, setBytes] = useState<number | null>(null);
   const u = useUpdateState();
 
-  useEffect(() => { getSettings().then(setS); storageBytes().then(setBytes); }, []);
+  useEffect(() => {
+    getSettings().then((x) => { setS(x); setPaceText(x.targetPaceSec ? fmtDuration(x.targetPaceSec) : ''); });
+    storageBytes().then(setBytes);
+  }, []);
   if (!s) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
 
   const set = async (patch: Partial<Settings>) => {
@@ -119,6 +126,34 @@ export default function SettingsScreen() {
           <NeuSegmented value={s.gpsMode} onChange={(gpsMode) => set({ gpsMode })}
             options={[{ key: 'precise', label: 'Precise' }, { key: 'saver', label: 'Battery saver' }]} />
         </NeuCard>
+        <NeuCard radius={26} style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconWell icon="speedometer" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>Pace coach</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>Voice nudge when you drift ±15 s from your target</Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TextInput value={paceText} onChangeText={setPaceText} placeholder="e.g. 5:30" placeholderTextColor={C.muted}
+              keyboardType="numbers-and-punctuation" accessibilityLabel="Target pace per kilometre"
+              onEndEditing={() => {
+                const v = paceText.trim() ? parsePace(paceText) : null;
+                if (paceText.trim() && v == null) { Alert.alert('Use minutes:seconds', 'For example 5:30'); return; }
+                set({ targetPaceSec: v });
+              }}
+              style={{ flex: 1, color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 999,
+                paddingHorizontal: 18, paddingVertical: 10, fontWeight: '700' }} />
+            <Text style={{ color: C.muted }}>/km</Text>
+            {s.targetPaceSec ? <NeuButton small label="Off" onPress={() => { setPaceText(''); set({ targetPaceSec: null }); }} /> : null}
+          </View>
+        </NeuCard>
+        {Platform.OS === 'android' && (
+          <NeuTile icon="battery-heart-variant" title="Reliable background recording"
+            subtitle="Set Stride to “Unrestricted” battery use so Android never stops a recording"
+            onPress={() => IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+              .catch(() => Linking.openSettings())} />
+        )}
       </Section>
 
       <Section title="Your data">

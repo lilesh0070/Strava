@@ -93,7 +93,32 @@ export default function ActivityDetail() {
               <Stat label="Elev gain" value={String(a.elevGainM)} unit="m" />
               <Stat label="Max elev" value={Number.isFinite(maxAlt) ? String(Math.round(maxAlt)) : '–'} unit="m" />
             </View>
+            {a.maxSpeedMs ? (
+              <View style={{ flexDirection: 'row' }}>
+                <Stat label="Max speed" value={(a.maxSpeedMs * 3.6).toFixed(1)} unit="km/h" />
+                {a.effort ? <Stat label="Effort" value={`${a.effort}/10`} /> : <View style={{ flex: 1 }} />}
+              </View>
+            ) : null}
           </NeuCard>
+
+          {a.laps && a.laps.length > 1 && (
+            <NeuCard radius={28} style={{ gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+                <IconWell icon="flag-outline" />
+                <Text style={F.h2}>Laps</Text>
+              </View>
+              {a.laps.map((l) => (
+                <NeuCard key={l.n} inset radius={16} padding={10} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: C.muted, width: 36, fontWeight: '700' }}>#{l.n}</Text>
+                  <Text style={{ color: C.text, flex: 1, fontVariant: ['tabular-nums'] }}>{fmtKm(l.distanceM)} km</Text>
+                  <Text style={{ color: C.text, flex: 1, fontVariant: ['tabular-nums'] }}>{fmtDuration(l.durationSec)}</Text>
+                  <Text style={{ color: C.accent, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
+                    {info.usesPace ? `${fmtPace(l.distanceM, l.durationSec)}/km` : `${fmtSpeed(l.distanceM, l.durationSec)} km/h`}
+                  </Text>
+                </NeuCard>
+              ))}
+            </NeuCard>
+          )}
 
           <DetailsCard a={a} onChange={update} />
 

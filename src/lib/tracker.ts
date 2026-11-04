@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
+import { expectedSpeed, kalmanStep, lapsFromMarks, paceAdvice, rollingSpeed } from './live';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
   DEFAULT_SETTINGS, defaultName, gearKindFor, sessionMovingSec, sportInfo,
@@ -84,14 +85,28 @@ export function ingest(locations: Location.LocationObject[]) {
           s.status = 'recording';
           s.autoPaused = false;
           s.segments.push([p]);
+          s.kf = null;
           if (settings.voiceCues) Speech.speak('Resumed');
         }
         continue;
       }
 
-      if (acceptPoint(seg[seg.length - 1], p, s.sport === 'ride' ? 45 : 12)) {
-        if (seg.length) s.distanceM = (s.distanceM ?? 0) + haversine(seg[seg.length - 1], p);
-        seg.push(p);
+      // smooth good-quality fixes before deciding whether to keep them
+      let q = p;
+      if ((p.acc ?? 99) <= 35) {
+        s.kf = kalmanStep(s.kf, p, expectedSpeed(s.sport));
+        q = { ...p, lat: s.kf.lat, lng: s.kf.lng };
+      }
+      if (acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12)) {
+        const prev = seg[seg.length - 1];
+        if (prev) {
+          const d = haversine(prev, q);
+          s.distanceM = (s.distanceM ?? 0) + d;
+          const v = d / Math.max(1, (q.t - prev.t) / 1000);
+          if (seg.length > 3) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, v);
+        }
+        seg.push(q);
+        coachPace(s, seg, q.t);
         const km = Math.floor((s.distanceM ?? 0) / 1000);
         if (km > (s.lastCueKm ?? 0)) {
           s.lastCueKm = km;
@@ -106,6 +121,43 @@ export function ingest(locations: Location.LocationObject[]) {
       }
     }
     if (session) await persist();
+    notify();
+  });
+}
+
+function coachPace(s: Session, seg: Point[], now: number) {
+  const target = settings.targetPaceSec;
+  if (!target || !settings.voiceCues || !sportInfo(s.sport).usesPace) return;
+  if (now - (s.lastPaceAlertAt ?? s.startedAt) < 90_000) return; // at most every 90 s
+  const v = rollingSpeed(seg, 60);
+  const advice = paceAdvice(v ? 1000 / v : null, target);
+  if (!advice) return;
+  s.lastPaceAlertAt = now;
+  Speech.speak(advice === 'faster' ? 'Pick up the pace' : 'Ease off a little, you are ahead of target');
+}
+
+/** Current pace/speed from the last 30 s of movement (m/s). */
+export function currentSpeed(): number | null {
+  if (!session || session.status !== 'recording') return null;
+  return rollingSpeed(session.segments[session.segments.length - 1], 30);
+}
+
+/** Close the current lap. */
+export function lap() {
+  return locked(async () => {
+    if (!session) return;
+    const marks = session.laps ?? [];
+    const dist = session.distanceM ?? 0;
+    const sec = sessionMovingSec(session);
+    const prev = marks[marks.length - 1] ?? { distanceM: 0, movingSec: 0 };
+    if (sec - prev.movingSec < 3) return; // ignore double taps
+    session.laps = [...marks, { distanceM: dist, movingSec: sec }];
+    await persist();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    if (settings.voiceCues) {
+      const d = dist - prev.distanceM, t = sec - prev.movingSec;
+      Speech.speak(`Lap ${session.laps.length}. ${(d / 1000).toFixed(2)} kilometres in ${Math.floor(t / 60)} minutes ${Math.round(t % 60)} seconds.`);
+    }
     notify();
   });
 }
@@ -157,7 +209,7 @@ async function startUpdates(sport: Sport) {
         foregroundService: {
           notificationTitle: 'Stride is recording',
           notificationBody: 'Your activity is being tracked.',
-          notificationColor: '#C6F432',
+          notificationColor: '#F2762E',
         },
       });
       return;
@@ -220,6 +272,7 @@ export function resume() {
     session.pauseStartedAt = null;
     session.status = 'recording';
     session.autoPaused = false;
+    session.kf = null;
     session.segments.push([]);
     await persist();
     notify();
@@ -242,17 +295,21 @@ export async function finish(): Promise<Activity | null> {
     const s = session;
     const segments = s.segments.filter((seg) => seg.length > 1);
     const now = Date.now();
+    const movingSec = Math.round(sessionMovingSec(s, now));
+    const distanceM = totalDistance(segments);
     const a: Activity = {
       id: `${s.startedAt.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
       name: defaultName(s.sport, s.startedAt),
       sport: s.sport,
       startedAt: s.startedAt,
-      movingSec: Math.round(sessionMovingSec(s, now)),
+      movingSec,
       elapsedSec: Math.round((now - s.startedAt) / 1000),
-      distanceM: totalDistance(segments),
+      distanceM,
       elevGainM: Math.round(elevationGain(segments)),
       segments,
       gearId: gear?.id,
+      laps: s.laps?.length ? lapsFromMarks(s.laps, distanceM, movingSec) : undefined,
+      maxSpeedMs: s.maxSpeedMs,
     };
     session = null;
     await persist();

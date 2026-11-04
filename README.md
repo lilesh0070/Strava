@@ -23,6 +23,14 @@ The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is 
 - **In-app updates.**
   - **OTA:** JS changes published with `eas update` download in the background, and a "Restart" button applies them.
   - **New APK:** "Check for updates" reads the latest GitHub Release. If it is newer than the installed version, the APK downloads with a progress bar and the Android installer opens.
+- **Accurate live tracking.**
+  - A Kalman filter smooths GPS zig-zag, which otherwise inflates distance by a few percent.
+  - Low-accuracy and impossible fixes are dropped.
+  - A GPS-quality gate before Start warns if the signal is weak.
+  - A live ±m accuracy chip, with "signal lost" detection.
+- **Live stats.** Pace now (rolling 30 s), average pace, the current lap, a lap button with voice summaries, and max speed.
+- **Pace coach.** Set a target like 5:30/km and get voice nudges when you drift ±15 s.
+- **Reliable background setup.** A shortcut to Android's battery-optimisation screen.
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports merge with existing data and never delete anything.
 
@@ -70,6 +78,7 @@ src/app/                 Expo Router screens
   activity/[id].tsx      Activity detail
 src/components/          RouteMap (Leaflet WebView), RouteThumb (SVG), charts
 src/lib/geo.ts           Distance, splits, elevation, best-effort maths (unit-tested)
+src/lib/live.ts          Kalman filter, rolling pace, laps, pace coach, GPS health (unit-tested)
 src/lib/coach.ts         Voice cues, auto-pause rules, GPX, streaks (unit-tested)
 src/lib/tracker.ts       Location task + recording state machine
 src/lib/storage.ts       Activity persistence

@@ -9,6 +9,7 @@ import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed, totalDistance } from '../../lib/geo';
+import { gpsHealth, lapsFromMarks } from '../../lib/live';
 import { getSettings } from '../../lib/storage';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
@@ -62,7 +63,12 @@ export default function Record() {
   const info = sportInfo(active?.sport ?? sport);
   const dist = active ? totalDistance(active.segments) : 0;
   const moving = active ? sessionMovingSec(active) : 0;
-  const gpsOk = !!fix && (fix.acc ?? 99) <= 35;
+  const health = gpsHealth(fix, Date.now());
+  const gpsOk = health === 'good';
+  const cur = tracker.currentSpeed();
+  const laps = active?.laps ?? [];
+  const lapRows = active ? lapsFromMarks(laps, active.distanceM ?? dist, moving) : [];
+  const openLap = lapRows[lapRows.length - 1];
 
   const begin = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
@@ -75,6 +81,14 @@ export default function Record() {
         { text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() },
       ]);
       return;
+    }
+    if (health !== 'good') {
+      const go = await new Promise<boolean>((resolve) => Alert.alert(
+        health === 'lost' ? 'No GPS signal yet' : 'GPS signal is weak',
+        'Your route may be inaccurate for the first minute. Waiting a few seconds in open sky usually fixes it.',
+        [{ text: 'Wait', style: 'cancel', onPress: () => resolve(false) }, { text: 'Start anyway', onPress: () => resolve(true) }],
+      ));
+      if (!go) return;
     }
     if (!(await getSettings()).countdown) return begin();
     let n = 3;
@@ -128,8 +142,10 @@ export default function Record() {
         <RouteMap segments={active?.segments ?? []} current={fix} follow style={{ flex: 1, borderRadius: 26 }} />
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           {pill(<>
-            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: gpsOk ? C.success : '#F5A524' }} />
-            <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>{gpsOk ? 'GPS ready' : 'Finding GPS…'}</Text>
+            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: gpsOk ? C.success : health === 'weak' ? '#F5A524' : C.danger }} />
+            <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
+              {gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m` : health === 'weak' ? `Weak GPS ±${Math.round(fix?.acc ?? 0)} m` : active ? 'GPS signal lost' : 'Finding GPS…'}
+            </Text>
           </>)}
           <SettingsButton />
         </View>
@@ -157,8 +173,15 @@ export default function Record() {
             <View style={{ flexDirection: 'row' }}>
               <Stat big label="Distance" value={fmtKm(dist)} unit="km" />
               {info.usesPace
-                ? <Stat big label="Avg pace" value={fmtPace(dist, moving)} unit="/km" />
-                : <Stat big label="Avg speed" value={fmtSpeed(dist, moving)} unit="km/h" />}
+                ? <Stat big label="Pace now" value={cur ? fmtPace(1000, 1000 / cur) : '–:––'} unit="/km" />
+                : <Stat big label="Speed now" value={cur ? (cur * 3.6).toFixed(1) : '0.0'} unit="km/h" />}
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              {info.usesPace
+                ? <Stat label="Avg pace" value={fmtPace(dist, moving)} unit="/km" />
+                : <Stat label="Avg speed" value={fmtSpeed(dist, moving)} unit="km/h" />}
+              <Stat label={`Lap ${lapRows.length || 1}`} value={openLap ? fmtDuration(openLap.durationSec) : '0:00'} />
+              <Stat label="Lap dist" value={openLap ? fmtKm(openLap.distanceM) : '0.00'} unit="km" />
             </View>
             {active.status === 'paused' && (
               <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '800' }}>
@@ -167,8 +190,11 @@ export default function Record() {
             )}
             <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 28 }}>
               {active.status === 'recording' ? (
-                <NeuIconButton icon="pause" size={80} accent accessibilityLabel="Pause"
-                  onPress={() => tracker.pause()} />
+                <>
+                  <NeuIconButton icon="flag-outline" size={60} color={C.accent} accessibilityLabel="New lap" onPress={() => tracker.lap()} />
+                  <NeuIconButton icon="pause" size={80} accent accessibilityLabel="Pause" onPress={() => tracker.pause()} />
+                  <View style={{ width: 60 }} />
+                </>
               ) : (
                 <>
                   <NeuIconButton icon="play" size={80} accent accessibilityLabel="Resume" onPress={() => tracker.resume()} />
