@@ -4,14 +4,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { getProfile, getSettings, listActivities, listGear, saveActivity, saveGearList, saveProfile, saveSettings } from './storage';
+import { getProfile, getSettings, listFullActivities, notifyDataChanged, listGear, saveActivity, saveGearList, saveProfile, saveSettings } from './storage';
 import type { Activity } from './types';
 
 const FORMAT = 'stride-backup';
 const VERSION = 1;
 
 export async function buildBackup(): Promise<{ json: string; count: number }> {
-  const [activities, gear, profile, settings] = await Promise.all([listActivities(), listGear(), getProfile(), getSettings()]);
+  const [activities, gear, profile, settings] = await Promise.all([listFullActivities(), listGear(), getProfile(), getSettings()]);
   const json = JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), activities, gear, profile, settings });
   return { json, count: activities.length };
 }
@@ -23,12 +23,13 @@ export async function applyBackup(text: string, opts: { includeSettings?: boolea
   if (data.format !== FORMAT || !Array.isArray(data.activities)) throw new Error('That file is not a Stride backup.');
 
   const valid = data.activities.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && typeof a.startedAt === 'number');
-  for (const a of valid) await saveActivity(a);
+  for (const a of valid) await saveActivity({ ...a, lite: undefined, efforts: undefined }, { silent: true });
   if (Array.isArray(data.gear)) {
     const existing = await listGear();
     const ids = new Set(existing.map((g) => g.id));
     await saveGearList([...existing, ...(data.gear as typeof existing).filter((g) => g && !ids.has(g.id))]);
   }
+  notifyDataChanged();
   if (data.profile) await saveProfile({ ...(await getProfile()), ...data.profile });
   if (data.settings && opts.includeSettings !== false) await saveSettings({ ...(await getSettings()), ...data.settings });
   return valid.length;

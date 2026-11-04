@@ -4,21 +4,24 @@ import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { Pressable, Text, View } from 'react-native';
 import { useTheme } from '../lib/theme';
+import { useT } from '../lib/i18n';
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
-const META: Record<string, { label: string; icon: IconName }> = {
-  index: { label: 'Feed', icon: 'home-variant-outline' },
-  record: { label: 'Record', icon: 'record-circle-outline' },
-  profile: { label: 'You', icon: 'account-circle-outline' },
+const META: Record<string, { label: 'tab.feed' | 'tab.record' | 'tab.you'; icon: IconName }> = {
+  index: { label: 'tab.feed', icon: 'home-variant-outline' },
+  record: { label: 'tab.record', icon: 'record-circle-outline' },
+  profile: { label: 'tab.you', icon: 'account-circle-outline' },
 };
 
 export default function NeuTabBar({ state, navigateToTab, insets }: BottomTabBarProps) {
   const { C, S } = useTheme();
+  const { t } = useT();
   return (
     <View style={{ backgroundColor: C.bg, paddingHorizontal: 16, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 10) + 4 }}>
       <View style={{ flexDirection: 'row', borderRadius: 30, padding: 8, backgroundColor: C.bg, boxShadow: S.raised }}>
         {state.routes.map((route, i) => {
-          const m = META[route.name] ?? { label: route.name, icon: 'circle-outline' as IconName };
+          const meta = META[route.name];
+          const m = { label: meta ? t(meta.label) : route.name, icon: meta?.icon ?? ('circle-outline' as IconName) };
           const focused = state.index === i;
           const color = focused ? C.accent : C.muted;
           return (

@@ -48,6 +48,10 @@ The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is 
 - **Weekly insights.** This week vs the same point last week (km, time, % change).
 - **Monthly goal ring** on the You tab.
 - **Share as image.** A neumorphic activity card as a PNG for WhatsApp, Instagram, etc.
+- **Fast with a big history.** Lists use a light copy of each activity (simplified route + pre-computed best efforts). Full GPS points load only on the detail screen. Cards are memoised and the list is virtualised.
+- **हिन्दी.** The main screens and voice cues are available in Hindi (Settings → Language).
+- **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.
+- **Original app icon** and splash screen (light and dark).
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports merge with existing data and never delete anything.
 

@@ -17,13 +17,16 @@ import PaceChart from '../../components/PaceChart';
 import { deleteActivity, getActivity, getProfile, saveActivity } from '../../lib/storage';
 import { shareGpx } from '../../lib/exportGpx';
 import { useTheme } from '../../lib/theme';
+import { showToast } from '../../lib/toast';
 import { IconWell, NeuCard, NeuIconButton } from '../../components/Neu';
 import { sportInfo, type Activity } from '../../lib/types';
+import { useT } from '../../lib/i18n';
 
 export default function ActivityDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { width } = useWindowDimensions();
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const [a, setA] = useState<Activity | null | undefined>(undefined);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -62,9 +65,13 @@ export default function ActivityDetail() {
 
   const onExport = () => shareGpx(a).catch((e) => Alert.alert('Export failed', String(e?.message ?? e)));
 
-  const onDelete = () => Alert.alert('Delete activity?', 'This cannot be undone.', [
+  const onDelete = () => Alert.alert('Delete activity?', undefined, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: async () => { await deleteActivity(a.id); router.back(); } },
+    { text: 'Delete', style: 'destructive', onPress: async () => {
+      const removed = await deleteActivity(a.id);
+      router.back();
+      if (removed) showToast(t('toast.deleted'), { label: t('toast.undo'), run: () => { saveActivity(removed); } });
+    } },
   ]);
 
   return (

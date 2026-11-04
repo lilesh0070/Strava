@@ -12,6 +12,7 @@ import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
 import { expectedSpeed, kalmanStep, lapsFromMarks, paceAdvice, rollingSpeed } from './live';
 import { autoSync } from './githubSync';
+import { kmCueHi, speechLanguage, voicePhrases } from './strings';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
   DEFAULT_SETTINGS, defaultName, gearKindFor, sessionMovingSec, sportInfo,
@@ -26,6 +27,9 @@ let loaded = false;
 let watcher: Location.LocationSubscription | null = null;
 let lastFix: Point | null = null;
 let settings: Settings = { ...DEFAULT_SETTINGS };
+/** Speak in the app language (Hindi voice when Hindi is selected). */
+const say = (text: string, lang = settings.language) => Speech.speak(text, { language: speechLanguage(lang) });
+const phrase = () => voicePhrases[settings.language] ?? voicePhrases.en;
 const refreshSettings = () => getSettings().then((x) => { settings = x; }).catch(() => undefined);
 refreshSettings();
 export const getSettingsCache = () => settings;
@@ -108,7 +112,7 @@ export function ingest(locations: Location.LocationObject[]) {
           s.autoPaused = false;
           s.segments.push([p]);
           s.kf = null;
-          if (settings.voiceCues) Speech.speak('Resumed');
+          if (settings.voiceCues) say(phrase().resumed);
         }
         continue;
       }
@@ -134,13 +138,16 @@ export function ingest(locations: Location.LocationObject[]) {
         if (km > (s.lastCueKm ?? 0)) {
           s.lastCueKm = km;
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-          if (settings.voiceCues) Speech.speak(kmCue(km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace));
+          if (settings.voiceCues) {
+            const args = [km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace] as const;
+            say(settings.language === 'hi' ? kmCueHi(...args) : kmCue(...args));
+          }
         }
       } else if (settings.autoPause && shouldAutoPause(last?.t ?? s.startedAt, p.t) && (s.distanceM ?? 0) > 0) {
         s.status = 'paused';
         s.autoPaused = true;
         s.pauseStartedAt = last?.t ?? p.t;
-        if (settings.voiceCues) Speech.speak('Auto paused');
+        if (settings.voiceCues) say(phrase().paused);
       }
     }
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
@@ -156,7 +163,7 @@ function coachPace(s: Session, seg: Point[], now: number) {
   const advice = paceAdvice(v ? 1000 / v : null, target);
   if (!advice) return;
   s.lastPaceAlertAt = now;
-  Speech.speak(advice === 'faster' ? 'Pick up the pace' : 'Ease off a little, you are ahead of target');
+  say(advice === 'faster' ? phrase().faster : phrase().slower);
 }
 
 function stepWorkout(s: Session, now: number) {
@@ -166,7 +173,7 @@ function stepWorkout(s: Session, now: number) {
   if (!r.changed) return false;
   s.workout = r.p;
   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
-  Speech.speak(stepCue(w, r.p)); // workout cues always speak: they are the point of the feature
+  say(stepCue(w, r.p), 'en'); // workout cues always speak (English): they are the point of the feature
   return true;
 }
 
@@ -197,7 +204,7 @@ export function lap() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     if (settings.voiceCues) {
       const d = dist - prev.distanceM, t = sec - prev.movingSec;
-      Speech.speak(`Lap ${session.laps.length}. ${(d / 1000).toFixed(2)} kilometres in ${Math.floor(t / 60)} minutes ${Math.round(t % 60)} seconds.`);
+      say(phrase().lap(session.laps.length, (d / 1000).toFixed(2), t));
     }
     notify();
   });
@@ -297,7 +304,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
   });
   await startUpdates(sport);
   const w = findWorkout(workoutId);
-  if (w && session?.workout) Speech.speak(`${w.name}. ${stepCue(w, session.workout)}`);
+  if (w && session?.workout) say(`${w.name}. ${stepCue(w, session.workout)}`, 'en');
   notify();
 }
 

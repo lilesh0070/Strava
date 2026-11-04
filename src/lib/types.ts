@@ -30,6 +30,9 @@ export type Activity = {
   maxSpeedMs?: number;
   manual?: boolean; // entered by hand (treadmill, gym, forgot to record)
   workoutName?: string;
+  /** Present on list summaries: segments are simplified for drawing, best efforts are pre-computed. */
+  lite?: boolean;
+  efforts?: Record<string, number>; // metres → fastest seconds
 };
 
 export type GearKind = 'shoes' | 'bike';
@@ -50,10 +53,11 @@ export type Settings = {
   targetPaceSec: number | null; // pace coach target (sec/km); null = off
   reminder: boolean;
   reminderHour: number;
+  language: 'en' | 'hi';
 };
 export const DEFAULT_SETTINGS: Settings = {
   voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, targetPaceSec: null,
-  reminder: false, reminderHour: 18,
+  reminder: false, reminderHour: 18, language: 'en',
 };
 
 export type Session = {

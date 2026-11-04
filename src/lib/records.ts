@@ -22,7 +22,7 @@ export function personalRecords(acts: Activity[]): Map<string, PersonalRecord> {
   for (const a of acts) {
     if (a.sport === 'run' && !a.manual) {
       for (const e of EFFORTS) {
-        const t = bestEffort(a.segments, e.m);
+        const t = a.efforts ? a.efforts[e.m] ?? null : bestEffort(a.segments, e.m);
         if (t != null) consider({ key: e.key, label: e.label, kind: 'effort', value: t, activityId: a.id }, true);
       }
     }

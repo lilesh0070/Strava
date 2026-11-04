@@ -144,3 +144,27 @@ export function fmtSpeed(distanceM: number, sec: number): string {
   if (sec <= 0) return '0.0';
   return ((distanceM / sec) * 3.6).toFixed(1);
 }
+
+/** Ramer–Douglas–Peucker simplification (tolerance in metres). Keeps the shape, drops most points. */
+export function simplify(seg: Point[], toleranceM = 6): Point[] {
+  if (seg.length < 3) return seg;
+  const keep = new Uint8Array(seg.length);
+  keep[0] = keep[seg.length - 1] = 1;
+  const stack: [number, number][] = [[0, seg.length - 1]];
+  // perpendicular distance using a local equirectangular projection (fine at route scale)
+  const k = Math.cos((seg[0].lat * Math.PI) / 180) * 111320;
+  const xy = (p: Point) => [p.lng * k, p.lat * 110540];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const [ax, ay] = xy(seg[a]), [bx, by] = xy(seg[b]);
+    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1e-9;
+    let maxD = -1, idx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const [px, py] = xy(seg[i]);
+      const d = Math.abs(dy * px - dx * py + bx * ay - by * ax) / len;
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > toleranceM && idx > 0) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+  }
+  return seg.filter((_, i) => keep[i]);
+}

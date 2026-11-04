@@ -38,7 +38,7 @@ export function NeuButton({ label, icon, onPress, selected, accent, style, small
         paddingHorizontal: small ? 14 : 20, paddingVertical: small ? 9 : 14, borderRadius: 999,
         backgroundColor: accent ? C.accent : C.bg,
         boxShadow: pressed || selected ? (small ? S.insetSm : S.inset) : accent ? S.glow : small ? S.raisedSm : S.raised,
-        opacity: disabled ? 0.5 : 1,
+        opacity: disabled ? 0.5 : 1, transform: [{ scale: pressed ? 0.97 : 1 }],
       }, style]}
     >
       {icon ? <MaterialCommunityIcons name={icon} size={small ? 16 : 20} color={fg} /> : null}
@@ -62,6 +62,7 @@ export function NeuIconButton({ icon, onPress, size = 44, accent, color, accessi
         width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center',
         backgroundColor: accent ? C.accent : C.bg,
         boxShadow: pressed ? S.inset : accent ? S.glow : size > 56 ? S.raised : S.raisedSm,
+        transform: [{ scale: pressed ? 0.94 : 1 }],
       })}
     >
       <MaterialCommunityIcons name={icon} size={size * 0.45} color={color ?? (accent ? C.accentText : C.text)} />

@@ -53,7 +53,7 @@ export default function ProfileScreen() {
     return EFFORTS.map((e) => {
       let best: number | null = null;
       for (const a of acts) {
-        const t = bestEffort(a.segments, e.m);
+        const t = a.efforts ? a.efforts[e.m] ?? null : bestEffort(a.segments, e.m);
         if (t != null && (best == null || t < best)) best = t;
       }
       return { ...e, best };

@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { memo } from 'react';
 import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed } from '../lib/geo';
 import { useTheme } from '../lib/theme';
@@ -13,7 +14,7 @@ export function fmtDate(t: number) {
   });
 }
 
-export default function ActivityCard({ a }: { a: Activity }) {
+function ActivityCard({ a }: { a: Activity }) {
   const { width } = useWindowDimensions();
   const { C, S, F } = useTheme();
   const info = sportInfo(a.sport);
@@ -24,7 +25,7 @@ export default function ActivityCard({ a }: { a: Activity }) {
       onPress={() => router.push(`/activity/${a.id}`)}
       style={({ pressed }) => ({
         backgroundColor: C.bg, borderRadius: 28, padding: 16, marginHorizontal: 20, marginBottom: 22,
-        boxShadow: pressed ? S.inset : S.raised,
+        boxShadow: pressed ? S.inset : S.raised, transform: [{ scale: pressed ? 0.985 : 1 }],
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 }}>
@@ -50,3 +51,6 @@ export default function ActivityCard({ a }: { a: Activity }) {
     </Pressable>
   );
 }
+
+// Cards re-render only when their own activity changes, which keeps scrolling smooth.
+export default memo(ActivityCard, (p, n) => p.a === n.a);

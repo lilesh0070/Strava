@@ -2,7 +2,9 @@ import '../lib/tracker'; // registers the background location task at startup
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import CrashScreen from '../components/CrashScreen';
+import ToastHost from '../components/ToastHost';
 import UpdateBanner from '../components/UpdateBanner';
+import { I18nProvider } from '../lib/i18n';
 import { ThemeProvider, useTheme } from '../lib/theme';
 
 function Root() {
@@ -26,8 +28,10 @@ function Root() {
         <Stack.Screen name="heatmap" options={{ title: 'Your heatmap' }} />
         <Stack.Screen name="achievements" options={{ title: 'Achievements' }} />
         <Stack.Screen name="workouts" options={{ title: 'Interval workouts' }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
       </Stack>
       <UpdateBanner />
+      <ToastHost />
     </>
   );
 }
@@ -35,7 +39,9 @@ function Root() {
 export default function RootLayout() {
   return (
     <ThemeProvider>
-      <Root />
+      <I18nProvider>
+        <Root />
+      </I18nProvider>
     </ThemeProvider>
   );
 }

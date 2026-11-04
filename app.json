@@ -53,7 +53,20 @@
       "expo-sharing",
       "expo-notifications",
       "./plugins/withReleaseSigning",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#E9EDF3",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#262A31"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

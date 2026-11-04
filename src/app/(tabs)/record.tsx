@@ -18,6 +18,7 @@ import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
 import { SPORTS, sessionMovingSec, sportInfo, type Sport } from '../../lib/types';
+import { useT } from '../../lib/i18n';
 
 // Snapshot changes identity on every tracker notification so React re-renders.
 let version = 0;
@@ -31,6 +32,7 @@ function KeepAwake() { useKeepAwake(); return null; }
 
 export default function Record() {
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const insets = useSafeAreaInsets();
   const { session, fix } = useTracker();
   const [sport, setSport] = useState<Sport>('run');
@@ -89,9 +91,9 @@ export default function Record() {
     }
     if (health !== 'good') {
       const go = await new Promise<boolean>((resolve) => Alert.alert(
-        health === 'lost' ? 'No GPS signal yet' : 'GPS signal is weak',
-        'Your route may be inaccurate for the first minute. Waiting a few seconds in open sky usually fixes it.',
-        [{ text: 'Wait', style: 'cancel', onPress: () => resolve(false) }, { text: 'Start anyway', onPress: () => resolve(true) }],
+        health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
+        t('rec.weakBody'),
+        [{ text: t('rec.wait'), style: 'cancel', onPress: () => resolve(false) }, { text: t('rec.anyway'), onPress: () => resolve(true) }],
       ));
       if (!go) return;
     }
@@ -120,11 +122,11 @@ export default function Record() {
   };
 
   const onFinish = () => {
-    Alert.alert('Finish activity?', undefined, [
-      { text: 'Resume', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: () => tracker.discard() },
+    Alert.alert(t('rec.finishQ'), undefined, [
+      { text: t('rec.resume'), style: 'cancel' },
+      { text: t('rec.discard'), style: 'destructive', onPress: () => tracker.discard() },
       {
-        text: 'Save',
+        text: t('rec.save'),
         onPress: async () => {
           const before = await listActivities().catch(() => []);
           const a = await tracker.finish();
@@ -135,7 +137,7 @@ export default function Record() {
             ...newRecords(before, a).map((r) => `🏆 New PR: ${r.label}${r.kind === 'effort' ? ` — ${fmtDuration(r.value)}` : ''}`),
             ...newlyEarned(before, a).map((b) => `🏅 Badge: ${b.title}`),
           ];
-          if (lines.length) Alert.alert('Nice work!', lines.join('\n'));
+          if (lines.length) Alert.alert(t('rec.nice'), lines.join('\n'));
         },
       },
     ]);
@@ -156,14 +158,14 @@ export default function Record() {
           {pill(<>
             <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: gpsOk ? C.success : health === 'weak' ? '#F5A524' : C.danger }} />
             <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
-              {gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m` : health === 'weak' ? `Weak GPS ±${Math.round(fix?.acc ?? 0)} m` : active ? 'GPS signal lost' : 'Finding GPS…'}
+              {gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m` : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m` : active ? t('rec.gpsLost') : t('rec.finding')}
             </Text>
           </>)}
           <SettingsButton />
         </View>
         {perm === 'foreground' && (
           <View style={{ position: 'absolute', bottom: 16, alignSelf: 'center' }}>
-            {pill(<Text style={{ color: C.muted, fontSize: 11 }}>Keep the app open while recording</Text>)}
+            {pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
           </View>
         )}
       </View>
@@ -175,25 +177,25 @@ export default function Record() {
               backgroundColor: C.bg, boxShadow: S.inset }}>
               <Text style={{ fontSize: 60, fontWeight: '900', color: C.accent }}>{countdown}</Text>
             </View>
-            <NeuButton small label="Cancel" onPress={cancelCountdown} />
+            <NeuButton small label={t('rec.cancel')} onPress={cancelCountdown} />
           </View>
         ) : active ? (
           <>
             <NeuCard inset radius={24} padding={14}>
-              <Stat big label="Time" value={fmtDuration(moving)} />
+              <Stat big label={t('rec.time')} value={fmtDuration(moving)} />
             </NeuCard>
             <View style={{ flexDirection: 'row' }}>
-              <Stat big label="Distance" value={fmtKm(dist)} unit="km" />
+              <Stat big label={t('rec.distance')} value={fmtKm(dist)} unit="km" />
               {info.usesPace
-                ? <Stat big label="Pace now" value={cur ? fmtPace(1000, 1000 / cur) : '–:––'} unit="/km" />
-                : <Stat big label="Speed now" value={cur ? (cur * 3.6).toFixed(1) : '0.0'} unit="km/h" />}
+                ? <Stat big label={t('rec.paceNow')} value={cur ? fmtPace(1000, 1000 / cur) : '–:––'} unit="/km" />
+                : <Stat big label={t('rec.speedNow')} value={cur ? (cur * 3.6).toFixed(1) : '0.0'} unit="km/h" />}
             </View>
             <View style={{ flexDirection: 'row' }}>
               {info.usesPace
-                ? <Stat label="Avg pace" value={fmtPace(dist, moving)} unit="/km" />
-                : <Stat label="Avg speed" value={fmtSpeed(dist, moving)} unit="km/h" />}
-              <Stat label={`Lap ${lapRows.length || 1}`} value={openLap ? fmtDuration(openLap.durationSec) : '0:00'} />
-              <Stat label="Lap dist" value={openLap ? fmtKm(openLap.distanceM) : '0.00'} unit="km" />
+                ? <Stat label={t('rec.avgPace')} value={fmtPace(dist, moving)} unit="/km" />
+                : <Stat label={t('rec.avgSpeed')} value={fmtSpeed(dist, moving)} unit="km/h" />}
+              <Stat label={`${t('rec.lap')} ${lapRows.length || 1}`} value={openLap ? fmtDuration(openLap.durationSec) : '0:00'} />
+              <Stat label={t('rec.lapDist')} value={openLap ? fmtKm(openLap.distanceM) : '0.00'} unit="km" />
             </View>
             {(() => {
               const w = findWorkout(active.workout?.workoutId);
@@ -214,7 +216,7 @@ export default function Record() {
             })()}
             {active.status === 'paused' && (
               <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '800' }}>
-                {active.autoPaused ? 'AUTO-PAUSED · start moving to resume' : 'PAUSED'}
+                {active.autoPaused ? t('rec.autoPaused') : t('rec.paused')}
               </Text>
             )}
             <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 28 }}>
@@ -234,7 +236,7 @@ export default function Record() {
           </>
         ) : (
           <>
-            <Text style={[F.label, { textAlign: 'center' }]}>Choose a sport</Text>
+            <Text style={[F.label, { textAlign: 'center' }]}>{t('rec.choose')}</Text>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               {SPORTS.map((s) => {
                 const sel = s.key === sport;
@@ -247,7 +249,7 @@ export default function Record() {
                 );
               })}
             </View>
-            <NeuButton small icon="timer-outline" label={findWorkout(selectedWorkout)?.name ?? 'Free run · choose workout'}
+            <NeuButton small icon="timer-outline" label={findWorkout(selectedWorkout)?.name ?? t('rec.free')}
               selected={!!selectedWorkout} onPress={() => router.push('/workouts')} style={{ alignSelf: 'center' }} />
             <View style={{ alignItems: 'center' }}>
               <NeuIconButton icon="play" size={84} accent accessibilityLabel={`Start ${info.label}`} onPress={onStart} />

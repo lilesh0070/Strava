@@ -12,6 +12,7 @@ import { useTheme } from '../lib/theme';
 import { refreshSettings } from '../lib/tracker';
 import type { Settings } from '../lib/types';
 import { applyOta, checkForUpdates, currentBuildId, currentVersion, installApk, useUpdateState } from '../lib/updates';
+import { useT } from '../lib/i18n';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   const { F } = useTheme();
@@ -25,6 +26,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export default function SettingsScreen() {
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const [paceText, setPaceText] = useState('');
   const [s, setS] = useState<Settings | null>(null);
   const [bytes, setBytes] = useState<number | null>(null);
@@ -59,7 +61,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ padding: 20, gap: 28, paddingBottom: 60 }}>
-      <Section title="App updates">
+      <Section title={t('set.updates')}>
         <NeuCard style={{ gap: 16 }} radius={28}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon={u.apk || u.ota === 'ready' ? 'rocket-launch-outline' : 'shield-check-outline'} size={52} />
@@ -91,7 +93,7 @@ export default function SettingsScreen() {
               <NeuButton accent icon="download" label={downloading ? 'Downloading…' : 'Download & install'} style={{ flex: 1 }}
                 disabled={downloading} onPress={() => installApk()} />
             ) : (
-              <NeuButton icon="refresh" label={u.checking ? 'Checking…' : 'Check for updates'} style={{ flex: 1 }}
+              <NeuButton icon="refresh" label={u.checking ? '…' : t('set.check')} style={{ flex: 1 }}
                 disabled={u.checking} onPress={() => checkForUpdates()} />
             )}
           </View>
@@ -101,10 +103,10 @@ export default function SettingsScreen() {
             </Text>
           ) : null}
         </NeuCard>
-        {toggle('update', 'Check automatically', 'Look for updates when the app opens', 'autoCheckUpdates')}
+        {toggle('update', t('set.checkAuto'), t('set.checkAutoSub'), 'autoCheckUpdates')}
       </Section>
 
-      <Section title="Appearance">
+      <Section title={t('set.appearance')}>
         <NeuSegmented value={s.theme} onChange={(theme) => set({ theme })}
           options={[
             { key: 'system', label: 'Auto', icon: 'theme-light-dark' },
@@ -113,10 +115,15 @@ export default function SettingsScreen() {
           ]} />
       </Section>
 
-      <Section title="Recording">
-        {toggle('account-voice', 'Voice updates', 'Time and pace every kilometre', 'voiceCues')}
-        {toggle('pause-circle-outline', 'Auto-pause', 'Pause when you stop, resume when you go', 'autoPause')}
-        {toggle('timer-3', 'Start countdown', '3-second countdown before recording', 'countdown')}
+      <Section title={t('set.language')}>
+        <NeuSegmented value={s.language} onChange={(language) => set({ language })}
+          options={[{ key: 'en', label: 'English' }, { key: 'hi', label: 'हिन्दी' }]} />
+      </Section>
+
+      <Section title={t('set.recording')}>
+        {toggle('account-voice', t('set.voice'), t('set.voiceSub'), 'voiceCues')}
+        {toggle('pause-circle-outline', t('set.autoPause'), t('set.autoPauseSub'), 'autoPause')}
+        {toggle('timer-3', t('set.countdown'), t('set.countdownSub'), 'countdown')}
         <NeuCard radius={26} style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon="crosshairs-gps" />
@@ -158,7 +165,7 @@ export default function SettingsScreen() {
         )}
       </Section>
 
-      <Section title="Motivation">
+      <Section title={t('set.motivation')}>
         <NeuCard radius={26} style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon="bell-ring-outline" />
@@ -186,7 +193,7 @@ export default function SettingsScreen() {
         </NeuCard>
       </Section>
 
-      <Section title="Your data">
+      <Section title={t('set.data')}>
         <GithubSyncCard />
         <NeuTile icon="cloud-upload-outline" title="Back up" subtitle="Save all activities, gear and settings to a file"
           onPress={() => exportBackup().catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
@@ -202,7 +209,7 @@ export default function SettingsScreen() {
         )}
       </Section>
 
-      <Section title="About">
+      <Section title={t('set.about')}>
         <NeuTile icon="github" title="Source code" subtitle="github.com/lilesh0070/strava"
           onPress={() => Linking.openURL('https://github.com/lilesh0070/strava')} />
         <Text style={{ color: C.muted, fontSize: 11, marginLeft: 6 }}>Map data © OpenStreetMap contributors</Text>
