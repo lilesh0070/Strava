@@ -4,6 +4,13 @@ An original GPS activity tracker for Android and iOS, built with React Native an
 
 The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is shaped by a soft highlight and shadow, icons sit in inset wells, and the tab bar floats at the bottom.
 
+
+## Download
+
+**[⬇ Download the latest APK](https://github.com/lilesh0070/Strava/releases/latest)** for Android. Open the link, tap `stride-v….apk`, allow "install unknown apps", then tap Install.
+
+Once installed, new versions arrive through **Settings → Check for updates** inside the app.
+
 ## Features
 
 - **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service / iOS background location).
