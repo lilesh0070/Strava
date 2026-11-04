@@ -25,6 +25,9 @@ on:
         required: false
   push:
     tags: ['v*']
+    # Changing the version in app.json on main also releases (no tag push needed)
+    branches: [main]
+    paths: ['app.json']
 
 permissions:
   contents: write
@@ -84,16 +87,28 @@ jobs:
           echo "TAG=v$VERSION" >> "$GITHUB_ENV"
 
       - name: Use pushed tag
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         run: |
           APP=$(node -p "require('./app.json').expo.version")
           [ "v$APP" = "$GITHUB_REF_NAME" ] || { echo "::error::app.json version $APP does not match tag $GITHUB_REF_NAME"; exit 1; }
           echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
 
+      - name: Version change on main
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        run: |
+          APP=$(node -p "require('./app.json').expo.version")
+          if git rev-parse -q --verify "refs/tags/v$APP" >/dev/null; then
+            echo "::notice::v$APP is already released, nothing to do"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+          echo "TAG=v$APP" >> "$GITHUB_ENV"
+
       - name: Generate native Android project
+        if: env.SKIP != '1'
         run: npx expo prebuild -p android --no-install --clean
 
       - name: Prepare signing key
+        if: env.SKIP != '1'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -106,6 +121,7 @@ jobs:
           fi
 
       - name: Build APK
+        if: env.SKIP != '1'
         working-directory: android
         env:
           STRIDE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -116,15 +132,18 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK
+        if: env.SKIP != '1'
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/stride-${TAG}.apk"
           ls -lh dist
 
       - name: Publish GitHub release
+        if: env.SKIP != '1'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           name: Stride ${{ env.TAG }}
           body: ${{ inputs.notes }}
           generate_release_notes: true
