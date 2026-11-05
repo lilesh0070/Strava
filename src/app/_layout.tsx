@@ -1,3 +1,4 @@
+import { startFriendsSync } from '../lib/friendsApp';
 import { restore } from '../lib/tracker'; // the background task itself is defined from index.js, before any route loads
 import { Stack } from 'expo-router';
 import { useEffect } from 'react';
@@ -12,6 +13,7 @@ function Root() {
   const { C } = useTheme();
   // pick up a recording the OS interrupted and restart its GPS right away, not when Record is first opened
   useEffect(() => { restore().catch(() => undefined); }, []);
+  useEffect(() => { startFriendsSync(); }, []);
   return (
     <>
       <StatusBar style={C.scheme === 'dark' ? 'light' : 'dark'} />
@@ -31,6 +33,7 @@ function Root() {
         <Stack.Screen name="heatmap" options={{ title: 'Your heatmap' }} />
         <Stack.Screen name="achievements" options={{ title: 'Achievements' }} />
         <Stack.Screen name="workouts" options={{ title: 'Interval workouts' }} />
+        <Stack.Screen name="friends" options={{ title: 'Friends' }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
       </Stack>
       <UpdateBanner />

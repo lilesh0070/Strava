@@ -1,0 +1,61 @@
+rules_version = '2';
+// Security rules for Stride's friends & weekly leaderboard (Firestore).
+// Paste into Firebase console → Firestore Database → Rules → Publish.
+// Each phone signs in anonymously. Friends can see only each other's name and this week's km.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function isFriend(uid) { return exists(/databases/$(database)/documents/friends/$(me())/list/$(uid)); }
+    function ownsCode(code) {
+      return exists(/databases/$(database)/documents/codes/$(code))
+        && get(/databases/$(database)/documents/codes/$(code)).data.uid == me();
+    }
+
+    // Friend ID → account. One ID can be looked up (no listing); an ID is claimed once and never moves.
+    match /codes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn() && code.matches('STR-[A-Z0-9]{5}')
+        && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == me();
+    }
+
+    // What friends see: name and this week's km. Readable by its owner and their friends only.
+    match /profiles/{uid} {
+      allow get: if signedIn() && (uid == me() || isFriend(uid));
+      allow create, update: if signedIn() && uid == me()
+        && request.resource.data.keys().hasOnly(['code', 'name', 'weekKm', 'weekStart', 'updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 40
+        && request.resource.data.weekKm is number && request.resource.data.weekKm >= 0 && request.resource.data.weekKm < 100000
+        && request.resource.data.weekStart is int && request.resource.data.updatedAt is int
+        && request.resource.data.code is string && ownsCode(request.resource.data.code);
+      allow delete: if signedIn() && uid == me();
+    }
+
+    // A friend request, id "<from>_<to>". Only the two people involved can see or remove it.
+    match /requests/{id} {
+      allow read: if signedIn() && (resource.data.from == me() || resource.data.to == me());
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['from', 'to', 'fromName', 'fromCode', 'toCode', 'createdAt'])
+        && request.resource.data.from == me()
+        && request.resource.data.to is string && request.resource.data.to != me()
+        && id == me() + '_' + request.resource.data.to
+        && request.resource.data.fromName is string && request.resource.data.fromName.size() <= 40
+        && request.resource.data.fromCode is string && ownsCode(request.resource.data.fromCode)
+        && request.resource.data.toCode is string
+        && get(/databases/$(database)/documents/codes/$(request.resource.data.toCode)).data.uid == request.resource.data.to
+        && request.resource.data.createdAt is int
+        && !isFriend(request.resource.data.to);
+      allow delete: if signedIn() && (resource.data.from == me() || resource.data.to == me());
+    }
+
+    // Friendships, stored on both sides. Only the person who received a request can create them
+    // (both sides at once, while the request exists); either friend can remove them.
+    match /friends/{a}/list/{b} {
+      allow read: if signedIn() && a == me();
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['since']) && request.resource.data.since is int && (
+        (a == me() && exists(/databases/$(database)/documents/requests/$(b + '_' + a))) ||
+        (b == me() && exists(/databases/$(database)/documents/requests/$(a + '_' + b))));
+      allow delete: if signedIn() && (a == me() || b == me());
+    }
+  }
+}

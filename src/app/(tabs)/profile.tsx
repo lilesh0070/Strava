@@ -15,6 +15,7 @@ import { getProfile, onDataChanged, updateProfile, type Profile } from '../../li
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
+import { useT } from '../../lib/i18n';
 
 /** Monday `k` weeks before `monday`, by calendar date so DST changes don't shift the buckets. */
 function weeksBefore(monday: number, k: number) {
@@ -48,6 +49,7 @@ const EFFORTS = [
 
 export default function ProfileScreen() {
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const { width } = useWindowDimensions();
   const { items, loadedAt } = useActivities();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -123,6 +125,7 @@ export default function ProfileScreen() {
         <NeuTile icon="map-legend" title="Heatmap" subtitle="All routes"
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/heatmap')} />
       </View>
+      <NeuTile icon="account-group-outline" title={t('fr.leaderboard')} subtitle={t('fr.leaderboardSub')} onPress={() => router.push('/friends')} />
 
       <NeuCard radius={28} style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
         <GoalRing value={profile?.monthlyGoalKm ? monthKm(items ?? []) / profile.monthlyGoalKm : 0}

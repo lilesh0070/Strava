@@ -60,6 +60,7 @@ Once installed, new versions arrive through **Settings → Check for updates** i
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.
 - **Original app icon** and splash screen (light and dark).
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
+- **Friends & weekly leaderboard.** Every phone gets a friend ID (Settings → Friends). Enter a friend's ID to send a request; once they accept, you both see who covered the most km this week. Friends only see your name and this week's km, never routes or locations.
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports only add what is missing: they never delete anything and never overwrite activities, gear or a profile already on the phone.
 
 All data is stored on the device with AsyncStorage.
@@ -100,6 +101,29 @@ Optional: OTA JS updates via `eas update` still work if you set up EAS, but noth
 - **Restore** merges the backup into a new phone.
 - Connecting a phone to an existing backup is safe: its first upload merges what is already in the cloud before saving, so a new phone can't replace your history.
 
+## Friends & leaderboard setup (one time, free)
+
+Friend requests and the leaderboard need a small online database. Stride uses Firebase on the free
+Spark plan; the phones talk to it directly, with no server of your own.
+
+1. Open [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (Analytics can stay off).
+2. **Build → Authentication → Get started → Sign-in method → Anonymous → Enable.**
+3. **Build → Firestore Database → Create database** (production mode; a nearby location such as `asia-south1`).
+4. **Firestore → Rules**: replace everything with the contents of [`firestore.rules`](firestore.rules) → **Publish**.
+5. **Project settings (gear) → General → Your apps → Web (`</>`)** → register an app, then copy `apiKey` and `projectId` from the config shown.
+6. Put them in `app.json` → `expo.extra.firebase`, then release a new APK:
+   ```json
+   "firebase": { "apiKey": "AIza…", "projectId": "stride-12345" }
+   ```
+
+Notes:
+- The Firebase web API key only identifies the project, so it is fine in the repo. Access is controlled by
+  `firestore.rules`: people can read only their friends' name and weekly km. Don't restrict the key to
+  Android apps, because the app calls Firebase's REST API directly.
+- The friend ID belongs to the app install. After reinstalling (or on a new phone) you get a new ID and
+  friends have to add you again.
+- `npm run test:friends` tests the feature and the rules against the Firebase emulators (needs Java).
+
 ## Project layout
 
 ```
@@ -117,6 +141,8 @@ src/lib/storage.ts       Activity persistence
 src/lib/updates.ts       OTA + GitHub-release APK updater
 src/lib/githubSync.ts    Secret-Gist cloud backup
 src/lib/records.ts       PRs and weekly insights (unit-tested)
+src/lib/friends.ts       Friend IDs, requests, weekly leaderboard (emulator-tested with firestore.rules)
+src/lib/firebase.ts      Tiny Firebase REST client (anonymous sign-in + Firestore)
 plugins/withReleaseSigning.js  Release signing from CI secrets
 .github/workflows/release.yml  GitHub-only APK build + release
 src/lib/theme.tsx        Neumorphic light/dark theme
@@ -131,4 +157,4 @@ src/components/Neu.tsx   NeuCard, NeuButton, NeuSwitch, IconWell, NeuTile…
 
 ## Roadmap ideas
 
-Cloud sync and login (Firebase/Supabase), followers and kudos, segments and leaderboards, GPX import, heart-rate sensors over BLE.
+Kudos and comments, segments, GPX import, heart-rate sensors over BLE.

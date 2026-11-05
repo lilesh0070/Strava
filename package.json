@@ -48,7 +48,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --import ./scripts/test-resolve.mjs --test src/lib/*.test.ts",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:friends": "npx -y firebase-tools@15.35.0 emulators:exec --only auth,firestore --project demo-stride 'node --experimental-strip-types --import ./scripts/test-resolve.mjs --test scripts/friends-rules.test.ts'"
   },
   "private": true
 }

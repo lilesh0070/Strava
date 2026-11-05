@@ -76,7 +76,11 @@
       "policy": "appVersion"
     },
     "extra": {
-      "updateRepo": "lilesh0070/strava"
+      "updateRepo": "lilesh0070/strava",
+      "firebase": {
+        "apiKey": "",
+        "projectId": ""
+      }
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",

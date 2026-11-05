@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Text, TextInput, View } from 'react-native';
@@ -199,6 +200,10 @@ export default function SettingsScreen() {
             </View>
           )}
         </NeuCard>
+      </Section>
+
+      <Section title={t('fr.title')}>
+        <NeuTile icon="account-group-outline" title={t('fr.leaderboard')} subtitle={t('fr.settingsSub')} onPress={() => router.push('/friends')} />
       </Section>
 
       <Section title={t('set.data')}>
