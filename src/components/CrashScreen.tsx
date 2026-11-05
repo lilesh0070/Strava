@@ -34,7 +34,8 @@ function CrashView({ error, retry }: Props) {
 
   const tryAgain = () => {
     // back to the History tab, so the screen that crashed isn't simply rendered again
-    try { router.dismissTo('/'); } catch { /* no navigator mounted: the reset below still renders home */ }
+    // dismissTo pops stack screens; inside the tab navigator it is a no-op, so also navigate to History
+    try { router.dismissTo('/'); router.navigate('/'); } catch { /* no navigator mounted: the reset below still renders home */ }
     retry().catch(() => undefined);
   };
 

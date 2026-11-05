@@ -101,6 +101,7 @@ jobs:
 
       - name: Rotate, sign and verify (scripts/sign-apk-rotation.sh, as in Release APK)
         run: |
+          set -o pipefail # the script's exit code, not tee's, decides the step
           OLD_KEYSTORE="$OLD_KEYSTORE" NEW_KEYSTORE="$W/throwaway.p12" NEW_KEY_ALIAS=throwaway \
           EXPECT_SIGNER="$NEW_FP" EXPECT_LINEAGE="$OLD_FP,$NEW_FP" LINEAGE_FILE="$W/rotation.lineage" \
             bash scripts/sign-apk-rotation.sh "$W/release.apk" "$W/rotated.apk" 2>&1 | tee "$W/sign.log"

@@ -327,7 +327,8 @@ export default function Record() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {focused && active?.status === 'recording' && <KeepAwake />}
+      {/* on the fallback watcher GPS stops with the screen, so the screen stays on whatever the setting says */}
+      {active?.status === 'recording' && (onWatcher ? <ScreenOn /> : focused && <KeepAwake />)}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
         <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE}

@@ -636,6 +636,7 @@ async function startTask(): Promise<boolean> {
   watcher?.remove(); // the task delivers the fixes now
   watcher = null;
   setMode('task');
+  restartedAt = Date.now(); // the new task gets the watchdog's grace period before it is judged
   return true;
 }
 

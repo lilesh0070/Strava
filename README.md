@@ -79,7 +79,7 @@ Wellbeing guidance only, not medical advice.
   - It checks when the app opens and again when you come back to it (at most every 3 hours), or any time with **Settings → Check for updates**. A banner says when a new version is out, and **Update** downloads it with a progress bar and opens the Android installer. Your data is kept.
   - It reads a small `update.json` that every release ships, from GitHub's download CDN. That avoids the GitHub API's 60-requests-per-hour-per-IP limit, which a whole office on one Wi-Fi would hit. Older releases fall back to the API.
   - The APK's size is checked before installing, so a broken download never reaches the installer. An earlier complete download is reused. If downloading fails there is an "Open download page" button.
-  - **Test builds:** releases marked *pre-release* are only offered to phones with **Settings → Test builds** on.
+  - **Test builds:** releases marked *pre-release* are only offered to phones with **Settings → Test builds** on (the switch is hidden: tap the "TBDI FitTrack x.y.z" line in Settings 7 times to show it).
   - **OTA:** the app can apply JS updates published with `eas update` ("Restart" button), but OTA is not configured yet (see *Releasing an update*), so today every fix ships as a release.
 - **Precise live tracking.**
   - Full GPS (highest accuracy: best-for-navigation on Android, "Best" on iPhone) every second (every 3 s in battery saver) with no distance filter, so the live position never goes stale, even when you stand still.
@@ -152,7 +152,7 @@ Everything runs on GitHub. No Expo account and no computer are needed, and it wo
    in the Firebase console (project `stribe-a8108`, Firestore → Rules → paste → Publish). Phones on the new
    version write the new fields; until the rules allow them they fall back to the weekly fields only.
 1. Open **GitHub → Actions → Release APK → Run workflow**, with *Use workflow from* left on `main`.
-2. Type the new version and, optionally, release notes (shown in the app's update screen). The version must be newer than `expo.version` in `app.json` (a pre-release counts too: after pre-release 1.3.9, promote it or release 1.3.10). Tick **prerelease** for a test build that only phones with *Test builds* on are offered.
+2. Type the new version and, optionally, release notes (shown in the app's update screen). The version must be newer than `expo.version` in `app.json` (a pre-release counts too: after pre-release 1.3.9, promote it or release 1.3.10). Tick **prerelease** for a test build that only phones with *Test builds* on are offered (hidden switch: 7 taps on the version line in Settings).
 3. The workflow then does the rest:
    - runs the unit tests and the typecheck (`npm test && npx tsc --noEmit`); a failure stops the run before anything is bumped;
    - bumps `expo.version` and `expo.android.versionCode` in `app.json`, then commits and tags;
@@ -314,7 +314,7 @@ src/lib/health.ts        Wellness score, water goal, streaks, insights, wellness
 src/lib/breaks.ts        Stretch routine and break-reminder schedule (unit-tested)
 src/lib/strings.ts       English + Hindi texts (every key in both; strings.test.ts checks it); i18n.tsx: useT, sportName, prLabel, badgeTitle
 modules/instagram-story  Local Expo module (Android): send a sticker to Instagram's story editor
-plugins/withReleaseSigning.js   Release signing from CI secrets
+plugins/withReleaseSigning.js   Release signing for local builds (CI signs with the debug key, then scripts/sign-apk-rotation.sh)
 plugins/withAsyncStorageSize.js Raises Android's AsyncStorage size limit
 firestore.rules          Who may read/write what in Firebase (publish after every change)
 scripts/friends-rules.test.ts   Friends + rules test against the Firebase emulators
@@ -460,8 +460,9 @@ Branches and releases: work on a branch → pull request → merge into `main` �
 
 Known gaps (good next steps):
 
-- Android release APKs are signed with the public React Native debug key unless the `ANDROID_KEYSTORE_*`
-  secrets are set; use a private key before sharing widely (switching keys needs one reinstall).
+- The v2 signature always uses the public React Native debug key (Android 7-8 verify that one); with the
+  `ANDROID_KEYSTORE_*` secrets set, v3 key rotation moves Android 9+ phones to the private key in place
+  (see *Signing*: no reinstall). Run *Signing self-test* before adding the secrets.
 - iPhone builds are only for AltStore/SideStore; TestFlight/App Store needs an Apple Developer account
   and an EAS (or Xcode) signing setup.
 - Direct Instagram story stickers on iPhone aren't implemented (the sticker is saved to the gallery and
