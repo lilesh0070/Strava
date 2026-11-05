@@ -55,7 +55,7 @@ async function gh(path: string, token: string, init: RequestInit = {}) {
   return res.json();
 }
 
-/** Save the token after checking it works, and find an existing Stride gist if there is one. */
+/** Save the token after checking it works, and find an existing backup gist if there is one. */
 export async function connect(token: string): Promise<void> {
   token = token.trim();
   if (!token) throw new Error('Paste a token first.');
@@ -83,7 +83,7 @@ export async function pushToGithub(): Promise<number> {
   setBusy(true);
   try {
     const { json, count } = await buildBackup();
-    const body = JSON.stringify({ description: 'Stride activity backup (private)', files: { [FILE]: { content: json } } });
+    const body = JSON.stringify({ description: 'TBDI FitTrack activity backup (private)', files: { [FILE]: { content: json } } });
     let gistId = meta.gistId;
     if (gistId) {
       try { await gh(`/gists/${gistId}`, token, { method: 'PATCH', body }); }
@@ -111,12 +111,12 @@ export async function pullFromGithub(): Promise<number> {
   await loadSyncMeta();
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
   if (!token) throw new Error('Connect GitHub first.');
-  if (!meta.gistId) throw new Error('No Stride backup found on this GitHub account yet.');
+  if (!meta.gistId) throw new Error('No TBDI FitTrack backup found on this GitHub account yet.');
   setBusy(true);
   try {
     const gist = await gh(`/gists/${meta.gistId}`, token);
     const f = gist.files?.[FILE];
-    if (!f) throw new Error('The backup gist has no Stride file.');
+    if (!f) throw new Error('The backup gist has no TBDI FitTrack file.');
     // large files are truncated in the API response; fetch the raw file instead
     const text: string = f.truncated ? await (await fetch(f.raw_url, { headers: { Authorization: `Bearer ${token}` } })).text() : f.content;
     const n = await applyBackup(text, { includeSettings: false });

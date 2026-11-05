@@ -11,7 +11,7 @@ const PROFILE = 'stride:profile';
 const SUMMARIES = 'stride:summaries';
 export const EFFORT_DISTANCES = [1000, 5000, 10000, 21097.5];
 
-export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number };
+export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number; team: string };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -128,7 +128,7 @@ export async function defaultGear(kind: GearKind): Promise<Gear | undefined> {
 
 export async function getProfile(): Promise<Profile> {
   const raw = await AsyncStorage.getItem(PROFILE);
-  return { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80, ...(raw ? JSON.parse(raw) : {}) };
+  return { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80, team: '', ...(raw ? JSON.parse(raw) : {}) };
 }
 
 export async function saveProfile(p: Profile): Promise<void> {

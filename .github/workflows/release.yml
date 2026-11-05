@@ -135,7 +135,7 @@ jobs:
         if: env.SKIP != '1'
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release.apk "dist/stride-${TAG}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/tbdi-fittrack-${TAG}.apk"
           ls -lh dist
 
       - name: Publish GitHub release
@@ -144,7 +144,7 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Stride ${{ env.TAG }}
+          name: TBDI FitTrack ${{ env.TAG }}
           body: ${{ inputs.notes }}
           generate_release_notes: true
           files: dist/*.apk

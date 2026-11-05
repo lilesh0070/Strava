@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Stride",
+    "name": "TBDI FitTrack",
     "slug": "stride",
     "scheme": "stride",
     "version": "1.2.0",
@@ -44,8 +44,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Stride uses your location to record your route while an activity is running, even when the screen is off.",
-          "locationWhenInUsePermission": "Stride uses your location to record your route.",
+          "locationAlwaysAndWhenInUsePermission": "TBDI FitTrack uses your location to record your route while an activity is running, even when the screen is off.",
+          "locationWhenInUsePermission": "TBDI FitTrack uses your location to record your route.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }

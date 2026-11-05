@@ -4,7 +4,7 @@ import { connect, disconnect, loadSyncMeta, pullFromGithub, pushToGithub, setAut
 import { useTheme } from '../lib/theme';
 import { IconWell, NeuButton, NeuCard, NeuSwitch } from './Neu';
 
-const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=gist&description=Stride%20backup';
+const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=gist&description=TBDI%20FitTrack%20backup';
 
 export default function GithubSyncCard() {
   const { C, S, F } = useTheme();

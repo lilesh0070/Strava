@@ -1,4 +1,6 @@
-# Stride
+# TBDI FitTrack
+
+*Move • Monitor • Stay Healthy*
 
 An original GPS activity tracker for Android and iOS, built with React Native and Expo. You can record runs, rides, walks and hikes, see the route on a map, and keep track of your progress.
 
@@ -7,9 +9,35 @@ The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is 
 
 ## Download
 
-**[⬇ Download the latest APK](https://github.com/lilesh0070/Strava/releases/latest)** for Android. Open the link, tap `stride-v….apk`, allow "install unknown apps", then tap Install.
+**[⬇ Download the latest APK](https://github.com/lilesh0070/Strava/releases/latest)** for Android. Open the link, tap `tbdi-fittrack-v….apk`, allow "install unknown apps", then tap Install.
 
 Once installed, new versions arrive through **Settings → Check for updates** inside the app.
+
+## Workplace wellness (Health tab)
+
+Built for employees, so healthy habits fit into a working day:
+
+- **Wellness score (0–100).** Rewards small daily actions: move 35, water 25, desk breaks 20, mind 10, check-in 10. A streak counts days with 50+.
+- **Water tracker.** One tap per glass. The daily goal comes from your body weight (35 ml/kg), plus about 500 ml per hour of exercise.
+- **Active minutes vs the WHO goal** of 150 minutes a week, from your recorded activities.
+- **Guided micro-breaks.**
+  - A 3-minute desk stretch: 9 office-friendly moves with voice cues.
+  - Box breathing (1–3 min).
+  - A 20-20-20 eye break.
+- **10-second daily check-in.** Mood, energy, sleep and stress.
+- **Personal insights.**
+  - Short sleep or high stress over the week.
+  - Low water.
+  - Whether moving lifts your mood.
+  - How many WHO minutes are left this week.
+  - No desk break yet today.
+- **Tip of the day.** 20 evidence-based tips.
+- **Workday break reminders.** Stretch, water, eye and walk nudges during your work hours (every 45–120 min, Mon–Fri or Mon–Sat). Tapping one opens the right guided break.
+- **Wellness badges**, alongside the activity badges.
+- **Share my week.** An image card for the team WhatsApp group, to start friendly challenges. Add your team or department on the You tab.
+- Everything is in English and Hindi, stays on the phone and is included in backups.
+
+Wellbeing guidance only, not medical advice.
 
 ## Features
 
@@ -26,7 +54,7 @@ Once installed, new versions arrive through **Settings → Check for updates** i
 - **Streak and calendar.** A weekly activity streak plus a month calendar showing your active days.
 - **Profile.** An 8-week distance chart with a weekly goal, all-time totals, and running best efforts (1k / 5k / 10k / half).
 
-- **Settings (cog, top-right).** App updates, theme (Auto/Light/Dark), voice, auto-pause, start countdown, GPS accuracy, and backup/restore.
+- **Settings (cog, top-right).** App updates, theme (Auto/Light/Dark), language, voice, auto-pause, start countdown, GPS accuracy, workday break reminders, and backup/restore.
 - **In-app updates.**
   - **OTA:** JS changes published with `eas update` download in the background, and a "Restart" button applies them.
   - **New APK:** "Check for updates" reads the latest GitHub Release. If it is newer than the installed version, the APK downloads with a progress bar and the Android installer opens.
@@ -78,7 +106,7 @@ Everything runs on GitHub. No Expo account and no computer are needed, and it wo
    - runs the tests;
    - bumps `app.json`, then commits and tags;
    - generates the Android project and builds the APK with Gradle;
-   - publishes a **GitHub Release** with `stride-v1.2.0.apk` attached.
+   - publishes a **GitHub Release** with `tbdi-fittrack-v1.2.0.apk` attached.
 4. On the phone, **Settings → Check for updates** finds the release, downloads the APK with a progress bar and opens the installer.
 
 Pushing a tag (`git tag v1.2.0 && git push --tags`) does the same.
@@ -108,6 +136,8 @@ Optional: OTA JS updates via `eas update` still work if you set up EAS, but noth
 ```
 src/app/                 Expo Router screens
   (tabs)/index.tsx       Feed
+  (tabs)/health.tsx      Health tab: wellness score, water, check-in, insights, weekly share
+  break.tsx              Guided desk stretch, box breathing, eye break
   (tabs)/record.tsx      Recorder
   (tabs)/profile.tsx     Stats, goal, best efforts
   activity/[id].tsx      Activity detail
@@ -120,6 +150,9 @@ src/lib/storage.ts       Activity persistence
 src/lib/updates.ts       OTA + GitHub-release APK updater
 src/lib/githubSync.ts    Secret-Gist cloud backup
 src/lib/records.ts       PRs and weekly insights (unit-tested)
+src/lib/health.ts        Wellness score, water goal, streaks, insights, wellness badges (unit-tested)
+src/lib/breaks.ts        Stretch routine and break-reminder schedule (unit-tested)
+src/lib/wellnessStore.ts Daily wellness log storage
 plugins/withReleaseSigning.js  Release signing from CI secrets
 .github/workflows/release.yml  GitHub-only APK build + release
 src/lib/theme.tsx        Neumorphic light/dark theme
@@ -128,7 +161,7 @@ src/components/Neu.tsx   NeuCard, NeuButton, NeuSwitch, IconWell, NeuTile…
 
 ## Scripts
 
-- `npm test`: unit tests for the geo maths and coach helpers
+- `npm test`: unit tests for the geo maths, live tracking, coach, records and wellness helpers
 - `npm run typecheck`
 
 ## Roadmap ideas

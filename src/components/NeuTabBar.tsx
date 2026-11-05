@@ -7,8 +7,9 @@ import { useTheme } from '../lib/theme';
 import { useT } from '../lib/i18n';
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
-const META: Record<string, { label: 'tab.feed' | 'tab.record' | 'tab.you'; icon: IconName }> = {
+const META: Record<string, { label: 'tab.feed' | 'tab.health' | 'tab.record' | 'tab.you'; icon: IconName }> = {
   index: { label: 'tab.feed', icon: 'home-variant-outline' },
+  health: { label: 'tab.health', icon: 'heart-pulse' },
   record: { label: 'tab.record', icon: 'record-circle-outline' },
   profile: { label: 'tab.you', icon: 'account-circle-outline' },
 };

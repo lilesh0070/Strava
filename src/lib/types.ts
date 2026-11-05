@@ -54,10 +54,17 @@ export type Settings = {
   reminder: boolean;
   reminderHour: number;
   language: 'en' | 'hi';
+  // workday wellness: stretch / water / eye-break nudges during work hours
+  breakReminders: boolean;
+  breakEveryMin: number; // 45 | 60 | 90 | 120
+  workStartH: number;
+  workEndH: number;
+  workDays: 'mon-fri' | 'mon-sat';
 };
 export const DEFAULT_SETTINGS: Settings = {
   voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, targetPaceSec: null,
   reminder: false, reminderHour: 18, language: 'en',
+  breakReminders: false, breakEveryMin: 60, workStartH: 9, workEndH: 18, workDays: 'mon-fri',
 };
 
 export type Session = {

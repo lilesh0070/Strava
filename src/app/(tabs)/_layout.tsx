@@ -38,6 +38,7 @@ export default function TabsLayout() {
           </View>
         ),
       }} />
+      <Tabs.Screen name="health" options={{ title: t('tab.health') }} />
       <Tabs.Screen name="record" options={{ title: t('tab.record'), headerShown: false }} />
       <Tabs.Screen name="profile" options={{ title: t('tab.you') }} />
     </Tabs>

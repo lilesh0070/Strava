@@ -84,7 +84,7 @@ export async function installApk(): Promise<void> {
   if (!rel) return;
   set({ apkProgress: 0, error: null });
   try {
-    const dest = new File(Paths.cache, `stride-${rel.version}.apk`);
+    const dest = new File(Paths.cache, `tbdi-fittrack-${rel.version}.apk`);
     const file = await File.downloadFileAsync(rel.url, dest, {
       idempotent: true,
       onProgress: ({ bytesWritten, totalBytes }) => {

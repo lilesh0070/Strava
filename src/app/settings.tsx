@@ -3,7 +3,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress, NeuSegmented, NeuSwitch, NeuTile } from '../components/Neu';
 import { parsePace } from '../lib/live';
-import { setDailyReminder } from '../lib/reminders';
+import { setBreakReminders, setDailyReminder } from '../lib/reminders';
 import { fmtDuration } from '../lib/geo';
 import GithubSyncCard from '../components/GithubSyncCard';
 import { exportBackup, importBackup, storageBytes } from '../lib/backup';
@@ -45,6 +45,27 @@ export default function SettingsScreen() {
     refreshSettings();
   };
 
+  /** Save and reschedule the workday break nudges in one go. */
+  const setBreaks = async (patch: Partial<Settings>) => {
+    const next = { ...s, ...patch };
+    if (next.breakReminders && !(await setBreakReminders(next).catch(() => false))) {
+      Alert.alert('Notifications are off', 'Allow notifications for TBDI FitTrack in system settings.');
+      return;
+    }
+    if (!next.breakReminders) await setBreakReminders(next).catch(() => undefined);
+    await set(patch);
+  };
+  const hourStepper = (label: string, value: number, min: number, max: number, onChange: (h: number) => void) => (
+    <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+      <Text style={{ color: C.muted, fontSize: 12 }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <NeuIconButton icon="minus" size={34} accessibilityLabel={`${label} earlier`} onPress={() => value > min && onChange(value - 1)} />
+        <Text style={{ color: C.text, fontWeight: '800', fontSize: 16, width: 52, textAlign: 'center' }}>{String(value).padStart(2, '0')}:00</Text>
+        <NeuIconButton icon="plus" size={34} accessibilityLabel={`${label} later`} onPress={() => value < max && onChange(value + 1)} />
+      </View>
+    </View>
+  );
+
   const toggle = (icon: Parameters<typeof NeuTile>[0]['icon'], title: string, subtitle: string, key: keyof Settings) => (
     <NeuTile icon={icon} title={title} subtitle={subtitle}
       right={<NeuSwitch accessibilityLabel={title} value={!!s[key]} onValueChange={(v) => set({ [key]: v } as Partial<Settings>)} />} />
@@ -66,7 +87,7 @@ export default function SettingsScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon={u.apk || u.ota === 'ready' ? 'rocket-launch-outline' : 'shield-check-outline'} size={52} />
             <View style={{ flex: 1 }}>
-              <Text style={F.h2}>Stride {currentVersion()}</Text>
+              <Text style={F.h2}>TBDI FitTrack {currentVersion()}</Text>
               <Text style={{ color: C.muted, fontSize: 12 }}>Build {currentBuildId()}</Text>
             </View>
           </View>
@@ -99,7 +120,7 @@ export default function SettingsScreen() {
           </View>
           {u.apk ? (
             <Text style={{ color: C.muted, fontSize: 11 }}>
-              Android will ask you to allow installs from Stride the first time. Your activities are kept.
+              Android will ask you to allow installs from TBDI FitTrack the first time. Your activities are kept.
             </Text>
           ) : null}
         </NeuCard>
@@ -116,7 +137,7 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title={t('set.language')}>
-        <NeuSegmented value={s.language} onChange={(language) => set({ language })}
+        <NeuSegmented value={s.language} onChange={(language) => { set({ language }); if (s.breakReminders) setBreakReminders({ ...s, language }); }}
           options={[{ key: 'en', label: 'English' }, { key: 'hi', label: 'हिन्दी' }]} />
       </Section>
 
@@ -163,10 +184,38 @@ export default function SettingsScreen() {
         </NeuCard>
         {Platform.OS === 'android' && (
           <NeuTile icon="battery-heart-variant" title="Reliable background recording"
-            subtitle="Set Stride to “Unrestricted” battery use so Android never stops a recording"
+            subtitle="Set TBDI FitTrack to “Unrestricted” battery use so Android never stops a recording"
             onPress={() => IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
               .catch(() => Linking.openSettings())} />
         )}
+      </Section>
+
+      <Section title={t('set.wellness')}>
+        <NeuCard radius={26} style={{ gap: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconWell icon="human-handsup" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>{t('set.breakRem')}</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>{t('set.breakRemSub')}</Text>
+            </View>
+            <NeuSwitch accessibilityLabel={t('set.breakRem')} value={s.breakReminders} onValueChange={(v) => setBreaks({ breakReminders: v })} />
+          </View>
+          {s.breakReminders && (
+            <>
+              <Text style={F.label}>{t('set.every')}</Text>
+              <NeuSegmented value={String(s.breakEveryMin)} onChange={(v) => setBreaks({ breakEveryMin: Number(v) })}
+                options={['45', '60', '90', '120'].map((m) => ({ key: m, label: `${m}m` }))} />
+              <Text style={F.label}>{t('set.workHours')}</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {hourStepper('Start', s.workStartH, 5, s.workEndH - 2, (h) => setBreaks({ workStartH: h }))}
+                {hourStepper('End', s.workEndH, s.workStartH + 2, 23, (h) => setBreaks({ workEndH: h }))}
+              </View>
+              <Text style={F.label}>{t('set.workDays')}</Text>
+              <NeuSegmented value={s.workDays} onChange={(workDays) => setBreaks({ workDays })}
+                options={[{ key: 'mon-fri', label: t('set.monFri') }, { key: 'mon-sat', label: t('set.monSat') }]} />
+            </>
+          )}
+        </NeuCard>
       </Section>
 
       <Section title={t('set.motivation')}>
@@ -179,7 +228,7 @@ export default function SettingsScreen() {
             </View>
             <NeuSwitch accessibilityLabel="Daily reminder" value={s.reminder} onValueChange={async (v) => {
               const ok = await setDailyReminder(v, s.reminderHour).catch(() => false);
-              if (!ok) { Alert.alert('Notifications are off', 'Allow notifications for Stride in system settings.'); return; }
+              if (!ok) { Alert.alert('Notifications are off', 'Allow notifications for TBDI FitTrack in system settings.'); return; }
               set({ reminder: v });
             }} />
           </View>
@@ -201,7 +250,7 @@ export default function SettingsScreen() {
         <GithubSyncCard />
         <NeuTile icon="cloud-upload-outline" title="Back up" subtitle="Save all activities, gear and settings to a file"
           onPress={() => exportBackup().catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
-        <NeuTile icon="cloud-download-outline" title="Restore" subtitle="Import a Stride backup file (merges, nothing is deleted)"
+        <NeuTile icon="cloud-download-outline" title="Restore" subtitle="Import a TBDI FitTrack backup file (merges, nothing is deleted)"
           onPress={async () => {
             try {
               const n = await importBackup();

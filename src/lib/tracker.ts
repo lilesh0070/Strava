@@ -344,7 +344,7 @@ async function startUpdates() {
         deferredUpdatesInterval: settings.gpsMode === 'saver' ? 10_000 : 0,
         showsBackgroundLocationIndicator: true,
         foregroundService: {
-          notificationTitle: 'Stride is recording',
+          notificationTitle: 'TBDI FitTrack is recording',
           notificationBody: 'Your activity is being tracked.',
           notificationColor: '#F2762E',
         },

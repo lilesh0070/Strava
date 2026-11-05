@@ -43,7 +43,7 @@ export function toGpx(name: string, type: string, startedAt: number, segments: P
     })
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Stride" xmlns="http://www.topografix.com/GPX/1/1">
+<gpx version="1.1" creator="TBDI FitTrack" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata><name>${esc(name)}</name><time>${new Date(startedAt).toISOString()}</time></metadata>
   <trk>
     <name>${esc(name)}</name>

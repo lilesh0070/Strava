@@ -5,22 +5,24 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getProfile, getSettings, listFullActivities, notifyDataChanged, listGear, saveActivity, saveGearList, saveProfile, saveSettings } from './storage';
+import type { WellnessLog } from './health';
 import type { Activity } from './types';
+import { getWellness, mergeWellness } from './wellnessStore';
 
-const FORMAT = 'stride-backup';
+const FORMAT = 'stride-backup'; // keep: identifies backups made before the rename too
 const VERSION = 1;
 
 export async function buildBackup(): Promise<{ json: string; count: number }> {
-  const [activities, gear, profile, settings] = await Promise.all([listFullActivities(), listGear(), getProfile(), getSettings()]);
-  const json = JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), activities, gear, profile, settings });
+  const [activities, gear, profile, settings, wellness] = await Promise.all([listFullActivities(), listGear(), getProfile(), getSettings(), getWellness()]);
+  const json = JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), activities, gear, profile, settings, wellness });
   return { json, count: activities.length };
 }
 
 /** Merge a backup into local data (by id; nothing is deleted). Returns the number of activities it contained. */
 export async function applyBackup(text: string, opts: { includeSettings?: boolean } = {}): Promise<number> {
-  let data: { format?: string; activities?: Activity[]; gear?: unknown[]; profile?: object; settings?: object };
+  let data: { format?: string; activities?: Activity[]; gear?: unknown[]; profile?: object; settings?: object; wellness?: WellnessLog };
   try { data = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
-  if (data.format !== FORMAT || !Array.isArray(data.activities)) throw new Error('That file is not a Stride backup.');
+  if (data.format !== FORMAT || !Array.isArray(data.activities)) throw new Error('That file is not a TBDI FitTrack backup.');
 
   const valid = data.activities.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && typeof a.startedAt === 'number');
   for (const a of valid) await saveActivity({ ...a, lite: undefined, efforts: undefined }, { silent: true });
@@ -29,6 +31,7 @@ export async function applyBackup(text: string, opts: { includeSettings?: boolea
     const ids = new Set(existing.map((g) => g.id));
     await saveGearList([...existing, ...(data.gear as typeof existing).filter((g) => g && !ids.has(g.id))]);
   }
+  if (data.wellness && typeof data.wellness === 'object') await mergeWellness(data.wellness);
   notifyDataChanged();
   if (data.profile) await saveProfile({ ...(await getProfile()), ...data.profile });
   if (data.settings && opts.includeSettings !== false) await saveSettings({ ...(await getSettings()), ...data.settings });
@@ -37,10 +40,10 @@ export async function applyBackup(text: string, opts: { includeSettings?: boolea
 
 export async function exportBackup(): Promise<number> {
   const { json, count } = await buildBackup();
-  const file = new File(Paths.cache, `stride-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  const file = new File(Paths.cache, `tbdi-fittrack-backup-${new Date().toISOString().slice(0, 10)}.json`);
   file.create({ overwrite: true });
   file.write(json);
-  await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save Stride backup' });
+  await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save TBDI FitTrack backup' });
   return count;
 }
 
