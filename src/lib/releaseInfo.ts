@@ -9,6 +9,10 @@ import { compareVersions } from './semver';
 
 export type ApkRelease = {
   version: string; notes: string; url: string; size: number; name: string; htmlUrl: string; prerelease?: boolean;
+  /** SHA-256 of the APK (lowercase hex), checked after the download. */
+  sha256?: string;
+  /** SHA-256 fingerprint of the certificate the APK is signed with ("AB:CD:…"). */
+  signer?: string;
 };
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -20,8 +24,26 @@ export function fromManifest(m: unknown): ApkRelease | null {
   const x = m as Record<string, unknown>;
   const version = str(x.version).replace(/^v/i, ''), url = str(x.url);
   if (!/^\d+\.\d+/.test(version) || !/^https:\/\//.test(url) || !/\.apk$/i.test(url)) return null;
-  return { version, url, notes: str(x.notes), size: num(x.size), name: str(x.apk) || url.split('/').pop()!, htmlUrl: str(x.page) || url };
+  const sha256 = str(x.sha256).toLowerCase(), signer = normSigner(x.signer);
+  return {
+    version, url, notes: str(x.notes), size: num(x.size), name: str(x.apk) || url.split('/').pop()!, htmlUrl: str(x.page) || url,
+    ...(/^[0-9a-f]{64}$/.test(sha256) ? { sha256 } : {}), ...(signer ? { signer } : {}),
+  };
 }
+
+/** A certificate fingerprint in one canonical form ("AB:CD:…", 32 bytes), or '' if it isn't one. */
+export function normSigner(v: unknown): string {
+  const hex = str(v).replace(/[^0-9a-f]/gi, '').toUpperCase();
+  return hex.length === 64 ? hex.match(/../g)!.join(':') : '';
+}
+
+/**
+ * Android only installs an update signed with the same key as the installed app. When the release key
+ * changes (e.g. from the shared debug key to a private one), the update has to be installed once by hand
+ * (uninstall, install), so the app says so instead of failing in the installer. Unknown on either side → false.
+ */
+export const needsReinstall = (rel: ApkRelease | null, ownSigner: string) =>
+  !!rel?.signer && !!normSigner(ownSigner) && rel.signer !== normSigner(ownSigner);
 
 type ApiAsset = { name?: string; browser_download_url?: string; size?: number };
 type ApiRelease = { tag_name?: string; body?: string; html_url?: string; draft?: boolean; prerelease?: boolean; assets?: ApiAsset[] };

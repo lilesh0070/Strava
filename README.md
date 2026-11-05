@@ -173,15 +173,25 @@ Two other things start a release by themselves, so avoid both:
 Never run **Release APK** from a side branch, not even as a pre-release: it commits and tags on the branch it
 runs on.
 
-**Signing.** By default the APK is signed with the standard React Native debug key. It is identical on every build, so updates install over each other.
-
-To use your own key, add these repo secrets:
-- `ANDROID_KEYSTORE_BASE64`
+**Signing (production).** Without secrets the APK is signed with the public React Native debug key
+(fingerprint `FA:C6:17:45:…:03:3B:9C`). It is the same for every React Native developer, so anyone could
+sign an APK that installs over TBDI FitTrack, and Play Protect warns about it. A production release uses a
+private key, given to the workflow as four repository secrets (Settings → Secrets and variables → Actions):
+- `ANDROID_KEYSTORE_BASE64` (the .jks / PKCS12 file, base64 on one line)
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
+- `ANDROID_KEY_PASSWORD` (same as the store password for a PKCS12 keystore)
 
-After switching keys, uninstall the old app once.
+Create a key once with `keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias tbdi-fittrack
+-keyalg RSA -keysize 4096 -validity 36500 -dname "CN=TBDI FitTrack, O=TBDI, C=IN"` and keep the file and
+password somewhere safe: **if the key is lost, phones can't update again without uninstalling.**
+
+Switching keys: Android only installs an update signed with the same key, so each phone reinstalls once.
+Every release writes the signing certificate's SHA-256 fingerprint into the app and into `update.json`
+(step *Signing fingerprint*); from v1.3.11 on the app notices a key change and shows the steps (back up,
+download the new APK, uninstall, install, restore) instead of a failing installer. So: release v1.3.11 or
+newer with the old key first, let phones update to it, then add the secrets and release the next version.
+The run log shows the fingerprint it signed with.
 
 Optional: OTA JS updates via `eas update` need an Expo account and `npx eas-cli@latest update:configure` (adds `updates.url` and `extra.eas.projectId` to `app.json`). They only reach phones running a version released after that; today's builds have OTA off, so ship fixes as a release.
 
