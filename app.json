@@ -48,7 +48,9 @@
           "locationAlwaysAndWhenInUsePermission": "TBDI FitTrack uses your location to record your route while an activity is running, even when the screen is off.",
           "locationWhenInUsePermission": "TBDI FitTrack uses your location to record your route.",
           "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "isAndroidForegroundServiceEnabled": true,
+          "locationAlwaysPermission": "TBDI FitTrack uses your location to record your route while an activity is running, even when the screen is off.",
+          "locationFullAccuracyPermission": "TBDI FitTrack needs your precise location to measure your route and distance accurately."
         }
       ],
       "expo-sharing",
@@ -79,7 +81,12 @@
       "expo-notifications",
       "./plugins/withReleaseSigning",
       "./plugins/withAsyncStorageSize",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       [
         "expo-splash-screen",
         {

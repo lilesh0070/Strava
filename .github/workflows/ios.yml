@@ -11,10 +11,6 @@
 name: iOS IPA (AltStore)
 
 on:
-  # TEMPORARY while the iOS build is being brought up: test-build on pushes to the work branch
-  push:
-    branches: [ccr-e6cbf69f-rqajcz]
-    paths: ['.github/workflows/ios.yml', 'scripts/altstore-source.mjs', 'app.json', 'package.json']
   workflow_dispatch:
     inputs:
       tag:
