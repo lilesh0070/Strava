@@ -101,10 +101,16 @@ Wellbeing guidance only, not medical advice.
 - **Personal records.** Fastest 1k/5k/10k/half, longest, biggest climb. Shown as 🏆 chips and in a pop-up when you beat one.
 - **Weekly insights.** This week vs the same point last week (km, time, % change).
 - **Monthly goal ring** on the You tab.
-- **Share to Instagram stories and anywhere else.** From any activity (or its card in History), tap Share. The route is drawn as one clean orange line, with no start or end markers:
-  - **Sticker:** a transparent PNG with the same orange route line and your stats (distance, time, average pace and speed, plus optional climb, calories and title). Save it, then add it in Instagram with *Stickers → Photo*, on top of any story photo or **video**.
-  - **Photo story:** pick a photo or take one, drag the sticker into place and share a sharp 1080×1920 story to Instagram, WhatsApp or any app.
-  - **Classic card:** the neumorphic summary card.
+- **Share to Instagram stories and anywhere else** (Strava-style). From any activity, or its card in History, tap Share:
+  - **Swipe through styles.** *Transparent* comes first: a sticker with the clean orange route line (no start or end markers) and your key stats on a see-through background. Then *Your photo*, *Dark* and *Orange*, where you drag the stats wherever you like.
+  - **Instagram Story:**
+    - With a Facebook App ID set (see below), the sticker opens straight in Instagram's story editor, where you pick a photo or video.
+    - Without one, the sticker is saved to your gallery and Instagram opens: pick your photo or video, then use *Stickers → Photo*.
+    - For the photo, dark and orange styles, the share sheet opens; choose Instagram → Stories.
+  - **Copy:** puts the image on the clipboard, so it can be pasted from the keyboard's clipboard. **Save:** to the gallery. **More:** any app.
+  - Choose what to show: route, distance, time, average pace and speed, steps, climb, calories, title, logo. White or dark text.
+  - Exports are 1080 px wide. The classic summary card is still there.
+  - **Direct Instagram stickers:** Instagram only accepts them from apps with a Facebook App ID. Create a free app at developers.facebook.com (no review needed), put its App ID in `app.json` → `expo.extra.facebookAppId`, and release a new version.
 - **Fast with a big history.** Lists use a light copy of each activity (simplified route + pre-computed best efforts). Full GPS points load only on the detail screen. Cards are memoised and the list is virtualised.
 - **हिन्दी.** The main screens and voice cues are available in Hindi (Settings → Language).
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.

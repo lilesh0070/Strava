@@ -99,7 +99,8 @@
       "policy": "appVersion"
     },
     "extra": {
-      "updateRepo": "lilesh0070/strava"
+      "updateRepo": "lilesh0070/strava",
+      "facebookAppId": ""
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",
