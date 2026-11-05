@@ -2,7 +2,8 @@
 #
 # Two ways to release:
 #   • GitHub → Actions → "Release APK" → Run workflow → enter a version like 1.2.0
-#     (bumps app.json, commits, tags, builds, publishes)
+#     (bumps app.json, commits, tags, builds, publishes). Tick "prerelease" for a test build that
+#     phones are not offered until you mark it as the latest release.
 #   • or push a tag yourself: git tag v1.2.0 && git push --tags
 #
 # The app's Settings → "Check for updates" reads the latest release and installs its APK.
@@ -23,6 +24,10 @@ on:
       notes:
         description: "What's new (shown in the app's update screen)"
         required: false
+      prerelease:
+        description: 'Test build: publish as a pre-release. Phones are not offered it until you mark it "latest".'
+        type: boolean
+        default: false
   push:
     tags: ['v*']
     # Changing the version in app.json on main also releases (no tag push needed)
@@ -146,5 +151,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: TBDI FitTrack ${{ env.TAG }}
           body: ${{ inputs.notes }}
+          # pre-releases never become "latest", so the in-app updater (releases/latest) ignores them
+          prerelease: ${{ inputs.prerelease == true }}
           generate_release_notes: true
           files: dist/*.apk
