@@ -129,7 +129,11 @@ export default function SettingsScreen() {
             <IconWell icon="crosshairs-gps" />
             <View style={{ flex: 1 }}>
               <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>GPS accuracy</Text>
-              <Text style={{ color: C.muted, fontSize: 13 }}>Battery saver records every 3 s</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>
+                {s.gpsMode === 'saver'
+                  ? 'A fix every 3 s, batched in the background. Uses less battery, less precise on bends.'
+                  : 'Full GPS every second with Doppler speed. Most accurate route, distance and live pace.'}
+              </Text>
             </View>
           </View>
           <NeuSegmented value={s.gpsMode} onChange={(gpsMode) => set({ gpsMode })}
@@ -210,8 +214,6 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title={t('set.about')}>
-        <NeuTile icon="github" title="Source code" subtitle="github.com/lilesh0070/strava"
-          onPress={() => Linking.openURL('https://github.com/lilesh0070/strava')} />
         <Text style={{ color: C.muted, fontSize: 11, marginLeft: 6 }}>Map data © OpenStreetMap contributors</Text>
       </Section>
     </ScrollView>

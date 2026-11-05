@@ -20,7 +20,7 @@
     "android": {
       "package": "com.lilesh.stride",
       "adaptiveIcon": {
-        "backgroundColor": "#E9EDF3",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -58,7 +58,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
-          "imageWidth": 180,
+          "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#E9EDF3",
           "dark": {

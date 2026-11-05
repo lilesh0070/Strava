@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Alert, Linking, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
@@ -38,6 +38,7 @@ export default function Record() {
   const [sport, setSport] = useState<Sport>('run');
   const [, tick] = useState(0);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
+  const [precision, setPrecision] = useState<tracker.Precision>('precise');
   const [countdown, setCountdown] = useState<number | null>(null);
   const selectedWorkout = useSelectedWorkout();
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -46,32 +47,39 @@ export default function Record() {
   useEffect(() => { tracker.restore(); }, []);
   useEffect(() => () => { if (cdTimer.current) clearInterval(cdTimer.current); }, []);
 
-  // live clock
+  // live clock + GPS watchdog
   useEffect(() => {
     if (!session) return;
-    const id = setInterval(() => { tick((n) => n + 1); tracker.workoutTick(); }, 1000);
+    const id = setInterval(() => { tick((n) => n + 1); tracker.workoutTick(); tracker.watchdog(); }, 1000);
     return () => clearInterval(id);
   }, [session]);
 
-  // show current position while this tab is focused
+  // show current position while this tab is focused; re-render every second so the GPS chip
+  // turns to "Finding GPS…" as soon as fixes stop instead of showing a stale accuracy
   useFocusEffect(useCallback(() => {
     let sub: { remove(): void } | null = null;
     let cancelled = false;
+    const checkPrecision = () => tracker.locationPrecision().then((p) => { if (!cancelled) setPrecision(p); });
     tracker.ensurePermissions().then(async (p) => {
       setPerm(p);
       if (p === 'denied' || cancelled) return;
+      checkPrecision();
       sub = await tracker.warmUp();
       if (cancelled) sub?.remove();
     });
-    return () => { cancelled = true; sub?.remove(); };
+    const id = setInterval(() => { if (!tracker.getSession()) tick((n) => n + 1); }, 1000);
+    // back from system settings: the user may have just turned on precise location
+    const app = AppState.addEventListener('change', (st) => { if (st === 'active') checkPrecision(); });
+    return () => { cancelled = true; sub?.remove(); clearInterval(id); app.remove(); };
   }, []));
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
   const dist = active ? totalDistance(active.segments) : 0;
   const moving = active ? sessionMovingSec(active) : 0;
-  const health = gpsHealth(fix, Date.now());
-  const gpsOk = health === 'good';
+  // age from when the fix arrived, not its GPS timestamp, so a skewed GPS clock can't fake a signal
+  const health = gpsHealth(fix ? { ...fix, t: tracker.getLastFixAt() } : null, Date.now());
+  const gpsOk = health === 'good' && precision === 'precise';
   const cur = tracker.currentSpeed();
   const laps = active?.laps ?? [];
   const lapRows = active ? lapsFromMarks(laps, active.distanceM ?? dist, moving) : [];
@@ -82,6 +90,22 @@ export default function Record() {
     await tracker.start(sport, selectedWorkout);
   };
 
+  /** Ask for precise location / location on. Resolves true when recording may go ahead. */
+  const fixPrecision = async (): Promise<boolean> => {
+    const pr = await tracker.improvePrecision();
+    setPrecision(pr);
+    if (pr === 'precise') return true;
+    return new Promise<boolean>((resolve) => Alert.alert(
+      pr === 'off' ? t('rec.locOffTitle') : t('rec.approxTitle'),
+      pr === 'off' ? t('rec.locOffBody') : t('rec.approxBody'),
+      [
+        { text: t('rec.cancel'), style: 'cancel', onPress: () => resolve(false) },
+        { text: t('rec.openSettings'), onPress: () => { Linking.openSettings(); resolve(false); } },
+        ...(pr === 'approximate' ? [{ text: t('rec.anyway'), onPress: () => resolve(true) }] : []),
+      ],
+    ));
+  };
+
   const onStart = async () => {
     if (perm === 'denied') {
       Alert.alert('Location needed', 'Allow location access in Settings to record activities.', [
@@ -89,7 +113,8 @@ export default function Record() {
       ]);
       return;
     }
-    if (health !== 'good') {
+    if (precision !== 'precise' && !(await fixPrecision())) return;
+    if (health !== 'good' && precision === 'precise') {
       const go = await new Promise<boolean>((resolve) => Alert.alert(
         health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
         t('rec.weakBody'),
@@ -155,12 +180,19 @@ export default function Record() {
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
         <RouteMap segments={active?.segments ?? []} current={fix} follow style={{ flex: 1, borderRadius: 26 }} />
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          {pill(<>
-            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: gpsOk ? C.success : health === 'weak' ? '#F5A524' : C.danger }} />
-            <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
-              {gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m` : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m` : active ? t('rec.gpsLost') : t('rec.finding')}
-            </Text>
-          </>)}
+          <Pressable disabled={precision === 'precise'} onPress={fixPrecision} accessibilityRole="button">
+            {pill(<>
+              <View style={{ width: 9, height: 9, borderRadius: 5,
+                backgroundColor: precision === 'off' ? C.danger : gpsOk ? C.success : precision === 'approximate' || health === 'weak' ? '#F5A524' : C.danger }} />
+              <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
+                {precision === 'off' ? t('rec.locOff')
+                  : precision === 'approximate' ? t('rec.approx')
+                  : gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m`
+                  : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m`
+                  : active ? t('rec.gpsLost') : t('rec.finding')}
+              </Text>
+            </>)}
+          </Pressable>
           <SettingsButton />
         </View>
         {perm === 'foreground' && (

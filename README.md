@@ -15,7 +15,7 @@ Once installed, new versions arrive through **Settings → Check for updates** i
 
 - **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service / iOS background location).
 - **Crash-safe sessions.** The current recording is saved to storage, so if the app is killed it picks up where it left off.
-- **GPS cleanup.** Drops low-accuracy fixes, standing-still jitter and impossible jumps.
+- **GPS cleanup.** Drops low-accuracy fixes, stale cached fixes, standing-still jitter and multipath jumps.
 - **Maps.** Uses Leaflet with OpenStreetMap tiles, so no API key is needed.
 - **Feed.** A weekly summary plus activity cards with route previews.
 - **Activity detail.** Route map, moving/elapsed time, elevation gain and profile, per-km splits, rename and delete.
@@ -30,11 +30,15 @@ Once installed, new versions arrive through **Settings → Check for updates** i
 - **In-app updates.**
   - **OTA:** JS changes published with `eas update` download in the background, and a "Restart" button applies them.
   - **New APK:** "Check for updates" reads the latest GitHub Release. If it is newer than the installed version, the APK downloads with a progress bar and the Android installer opens.
-- **Accurate live tracking.**
-  - A Kalman filter smooths GPS zig-zag, which otherwise inflates distance by a few percent.
-  - Low-accuracy and impossible fixes are dropped.
+- **Precise live tracking.**
+  - Full GPS (best-for-navigation) every second with no distance filter, so the live position never goes stale, even when you stand still.
+  - A constant-velocity Kalman filter fed with the GPS chip's Doppler speed and course: no zig-zag, no lag behind you, no corner cutting.
+  - Standing still adds no distance; a single multipath jump is rejected; Android's cached "last location" can't start a route in the wrong place.
+  - Pace now and max speed come from the filtered Doppler speed, so they react within a few seconds without spikes.
+  - The ±m accuracy chip re-checks every second and switches to "Finding GPS…" as soon as fixes stop.
+  - Detects approximate-only permission or location turned off, and offers the fix (Android: in-app dialogs).
+  - A watchdog restarts GPS if fixes stop arriving during a recording.
   - A GPS-quality gate before Start warns if the signal is weak.
-  - A live ±m accuracy chip, with "signal lost" detection.
 - **Live stats.** Pace now (rolling 30 s), average pace, the current lap, a lap button with voice summaries, and max speed.
 - **Pace coach.** Set a target like 5:30/km and get voice nudges when you drift ±15 s.
 - **Reliable background setup.** A shortcut to Android's battery-optimisation screen.
@@ -58,7 +62,7 @@ Once installed, new versions arrive through **Settings → Check for updates** i
 - **Fast with a big history.** Lists use a light copy of each activity (simplified route + pre-computed best efforts). Full GPS points load only on the detail screen. Cards are memoised and the list is virtualised.
 - **हिन्दी.** The main screens and voice cues are available in Hindi (Settings → Language).
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.
-- **Original app icon** and splash screen (light and dark).
+- **TBDI FitTrack app icon** (adaptive, with a themed Android 13+ variant) and splash screen (light and dark).
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports merge with existing data and never delete anything.
 
