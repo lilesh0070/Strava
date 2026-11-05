@@ -78,7 +78,12 @@ export function createFriends(d: { client: FirebaseClient; kv: KV; stats: () => 
     // The friend ID is kept in AsyncStorage, the sign-in in SecureStore. Android's backup restores only the
     // first, so on a new phone the stored ID belongs to the old account and the rules reject every profile
     // write that uses it: get a new ID instead of failing for good.
-    if (code && (await d.client.get(`codes/${code}`))?.uid !== uid) code = undefined;
+    // The old account's "already shared" snapshot goes with it, or the new profile might not be written until
+    // the numbers change (up to a week) if the first share below fails.
+    if (code && (await d.client.get(`codes/${code}`))?.uid !== uid) {
+      code = undefined;
+      await saveLocal({ code: undefined, shared: undefined, legacyUntil: undefined });
+    }
     if (!code) {
       const prof = await d.client.get(`profiles/${uid}`); // account kept but local data cleared
       if (typeof prof?.code === 'string') code = prof.code;
