@@ -16,6 +16,7 @@ import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
+import { clearLiveNotification, clearStaleLiveNotification, ensureLiveNotificationPermission, updateLiveNotification } from './liveNotification';
 import { STOPPED_MS, distancePending, distanceStep, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, processNoise, rollingSpeed, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
@@ -247,7 +248,15 @@ export function ingest(locations: Location.LocationObject[]) {
     }
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
     notify();
+    await liveStats(session?.status !== statusBefore);
   });
+}
+
+/** Android lock-screen stats (throttled inside; awaited under the lock so finish() can clear it last). */
+async function liveStats(force = false) {
+  if (!session) return;
+  if (!settings.liveNotification) { await clearLiveNotification(); return; }
+  await updateLiveNotification(session, sessionMovingSec(session, Date.now()), currentSpeed(), settings.language, force);
 }
 
 /** Credit the distance the no-Doppler smoother still holds back; called when a segment ends. */
@@ -288,6 +297,7 @@ export function workoutTick() {
     if (session.status === 'recording') checkTargets(session, now); // the time target needs no GPS fix
     const changed = stepWorkout(session, now) || JSON.stringify(session.cued ?? {}) !== cuedBefore;
     if (changed) { await persist(); notify(); }
+    await liveStats(); // keeps the time ticking in the notification even when no fix is kept
   });
 }
 
@@ -400,7 +410,8 @@ export async function restore(): Promise<Session | null> {
   await locked(load);
   if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
   if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
-  if (session) { startSteps(); prepareSpeechAudio(); }
+  if (session) { startSteps(); prepareSpeechAudio(); locked(() => liveStats(true)).catch(() => undefined); }
+  else clearStaleLiveNotification().catch(() => undefined);
   syncWarm();
   notify();
   return session;
@@ -609,6 +620,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
     await startUpdates();
     startSteps();
     syncWarm(); // the recording's own updates take over from the pre-start GPS
+    if (settings.liveNotification) ensureLiveNotificationPermission().then((ok) => { if (ok) return locked(() => liveStats(true)); }).catch(() => undefined);
     const w = findWorkout(workoutId);
     if (w && session?.workout) say(`${w.name}. ${stepCue(w, session.workout)}`, 'en');
     notify();
@@ -626,6 +638,7 @@ export function pause() {
     session.pauseStartedAt = Date.now();
     await persist();
     notify();
+    await liveStats(true);
   });
 }
 
@@ -646,6 +659,7 @@ export function resume() {
     session.segStartedAt = now;
     await persist();
     notify();
+    await liveStats(true);
   });
 }
 
@@ -661,6 +675,7 @@ export async function discard() {
     if (session) discarded = { session: { ...session, status: 'paused', pauseStartedAt: session.pauseStartedAt ?? Date.now() }, at: Date.now() };
     session = null;
     await persist();
+    await clearLiveNotification();
   });
   syncWarm();
   notify();
@@ -678,7 +693,7 @@ export async function undoDiscard(): Promise<boolean> {
     await persist();
     return true;
   });
-  if (ok) { startSteps(); syncWarm(); notify(); }
+  if (ok) { startSteps(); syncWarm(); notify(); locked(() => liveStats(true)).catch(() => undefined); }
   return ok;
 }
 
@@ -725,6 +740,7 @@ export async function finish(): Promise<Activity | null> {
     }
     session = null;
     await persist();
+    await clearLiveNotification();
     return a;
   });
   if (activity) autoSync();

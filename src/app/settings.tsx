@@ -163,6 +163,7 @@ export default function SettingsScreen() {
       <Section title={t('set.recording')}>
         {toggle('account-voice', t('set.voice'), t('set.voiceSub'), 'voiceCues')}
         {toggle('pause-circle-outline', t('set.autoPause'), t('set.autoPauseSub'), 'autoPause')}
+        {Platform.OS === 'android' && toggle('cellphone-text', t('set.liveNotif'), t('set.liveNotifSub'), 'liveNotification')}
         {toggle('timer-3', t('set.countdown'), t('set.countdownSub'), 'countdown')}
         <NeuCard radius={26} style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>

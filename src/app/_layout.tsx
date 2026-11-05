@@ -12,10 +12,13 @@ import UpdateBanner from '../components/UpdateBanner';
 import { I18nProvider, useT } from '../lib/i18n';
 import { ThemeProvider, useTheme } from '../lib/theme';
 
-// Show break reminders even while the app is open (quietly: no sound on top of a banner).
+// Show break reminders even while the app is open (quietly: no sound on top of a banner). The live
+// recording stats refresh every few seconds and only belong in the shade, never as a banner.
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
+    handleNotification: async (n) => ({
+      shouldShowBanner: n.request.content.data?.live !== true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false,
+    }),
   });
 }
 
