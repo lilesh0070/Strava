@@ -11,6 +11,8 @@ export async function setDailyReminder(enabled: boolean, hour: number): Promise<
   if (!perm.granted) return false;
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('reminders', {
+      // eslint-plugin-import can't see this enum through the package's compiled `export *`; tsc resolves it
+      // eslint-disable-next-line import/namespace
       name: 'Workout reminders', importance: Notifications.AndroidImportance.DEFAULT,
     });
   }

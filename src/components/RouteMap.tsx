@@ -56,9 +56,9 @@ export default function RouteMap({ segments, current, follow = false, style, int
     [segments, current, follow],
   );
   const latest = useRef(payload);
-  latest.current = payload;
 
   useEffect(() => {
+    latest.current = payload;
     ref.current?.injectJavaScript(`window.update && window.update(${payload});true;`);
   }, [payload]);
 

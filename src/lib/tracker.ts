@@ -15,7 +15,7 @@ import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
-  DEFAULT_SETTINGS, defaultName, gearKindFor, sessionMovingSec, sportInfo,
+  DEFAULT_SETTINGS, defaultName, gearKindFor, newActivityId, sessionMovingSec, sportInfo,
   type Activity, type Session, type Settings, type Sport,
 } from './types';
 
@@ -352,7 +352,7 @@ export async function finish(): Promise<Activity | null> {
     const movingSec = Math.round(sessionMovingSec(s, now));
     const distanceM = totalDistance(segments);
     const a: Activity = {
-      id: `${s.startedAt.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      id: newActivityId(s.startedAt),
       name: defaultName(s.sport, s.startedAt),
       sport: s.sport,
       startedAt: s.startedAt,

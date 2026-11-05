@@ -32,7 +32,7 @@ const EFFORTS = [
 export default function ProfileScreen() {
   const { C, S, F } = useTheme();
   const { width } = useWindowDimensions();
-  const { items } = useActivities();
+  const { items, loadedAt } = useActivities();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [filter, setFilter] = useState<Sport>('run');
   useEffect(() => { getProfile().then(setProfile); }, []);
@@ -40,13 +40,13 @@ export default function ProfileScreen() {
   const acts = useMemo(() => (items ?? []).filter((a) => a.sport === filter), [items, filter]);
 
   const weeks = useMemo(() => {
-    const thisMon = mondayOf(Date.now());
+    const thisMon = mondayOf(loadedAt);
     return Array.from({ length: 8 }, (_, i) => {
       const start = thisMon - (7 - i) * WEEK;
       const dist = acts.filter((a) => a.startedAt >= start && a.startedAt < start + WEEK).reduce((s, a) => s + a.distanceM, 0);
       return { start, km: dist / 1000 };
     });
-  }, [acts]);
+  }, [acts, loadedAt]);
 
   const records = useMemo(() => {
     if (filter !== 'run') return [];

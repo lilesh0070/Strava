@@ -81,7 +81,7 @@ export default function SettingsScreen() {
 
           {u.apk?.notes ? (
             <NeuCard inset radius={18} padding={12}>
-              <Text style={[F.label, { marginBottom: 4 }]}>What's new</Text>
+              <Text style={[F.label, { marginBottom: 4 }]}>{"What's new"}</Text>
               <Text style={{ color: C.text, fontSize: 13 }} numberOfLines={8}>{u.apk.notes}</Text>
             </NeuCard>
           ) : null}

@@ -1,11 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, View } from 'react-native';
 import { useTheme } from '../lib/theme';
 
 /** Soft pulsing placeholder cards shown while data loads, instead of a spinner. */
 export default function FeedSkeleton({ count = 2 }: { count?: number }) {
   const { C, S } = useTheme();
-  const o = useRef(new Animated.Value(0.5)).current;
+  const [o] = useState(() => new Animated.Value(0.5));
   useEffect(() => {
     const loop = Animated.loop(Animated.sequence([
       Animated.timing(o, { toValue: 1, duration: 700, useNativeDriver: true }),

@@ -82,6 +82,11 @@ export function sessionMovingSec(s: Session, now = Date.now()): number {
   return Math.max(0, (now - s.startedAt - paused) / 1000);
 }
 
+/** Unique activity id: start time in base 36 plus a short random tail (`tag` marks e.g. manual entries). */
+export function newActivityId(startedAt: number, tag = ''): string {
+  return `${startedAt.toString(36)}${tag}${Math.random().toString(36).slice(2, 6)}`;
+}
+
 export function defaultName(sport: Sport, startedAt: number): string {
   const h = new Date(startedAt).getHours();
   const part = h < 5 ? 'Night' : h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night';

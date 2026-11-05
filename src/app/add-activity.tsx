@@ -7,7 +7,7 @@ import { autoSync } from '../lib/githubSync';
 import { parseDuration } from '../lib/parse';
 import { defaultGear, saveActivity } from '../lib/storage';
 import { useTheme } from '../lib/theme';
-import { defaultName, gearKindFor, SPORTS, type Activity, type Sport } from '../lib/types';
+import { defaultName, gearKindFor, newActivityId, SPORTS, type Activity, type Sport } from '../lib/types';
 
 export default function AddActivity() {
   const { C, S, F } = useTheme();
@@ -30,7 +30,7 @@ export default function AddActivity() {
     startedAt.setTime(startedAt.getTime() - sec * 1000);
     const gear = await defaultGear(gearKindFor(sport)).catch(() => undefined);
     const a: Activity = {
-      id: `${startedAt.getTime().toString(36)}m${Math.random().toString(36).slice(2, 5)}`,
+      id: newActivityId(startedAt.getTime(), 'm'),
       name: name.trim() || defaultName(sport, startedAt.getTime()),
       description: notes.trim() || undefined,
       sport, startedAt: startedAt.getTime(), movingSec: sec, elapsedSec: sec,

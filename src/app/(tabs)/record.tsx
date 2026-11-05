@@ -36,7 +36,8 @@ export default function Record() {
   const insets = useSafeAreaInsets();
   const { session, fix } = useTracker();
   const [sport, setSport] = useState<Sport>('run');
-  const [, tick] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const [focused, setFocused] = useState(false);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const selectedWorkout = useSelectedWorkout();
@@ -46,31 +47,33 @@ export default function Record() {
   useEffect(() => { tracker.restore(); }, []);
   useEffect(() => () => { if (cdTimer.current) clearInterval(cdTimer.current); }, []);
 
-  // live clock
+  // live clock: drives the timer while recording, and GPS-signal freshness while this tab is open
+  const recording = !!session;
   useEffect(() => {
-    if (!session) return;
-    const id = setInterval(() => { tick((n) => n + 1); tracker.workoutTick(); }, 1000);
+    if (!recording && !focused) return;
+    const id = setInterval(() => { setNow(Date.now()); if (recording) tracker.workoutTick(); }, 1000);
     return () => clearInterval(id);
-  }, [session]);
+  }, [recording, focused]);
 
   // show current position while this tab is focused
   useFocusEffect(useCallback(() => {
     let sub: { remove(): void } | null = null;
     let cancelled = false;
+    setFocused(true);
     tracker.ensurePermissions().then(async (p) => {
       setPerm(p);
       if (p === 'denied' || cancelled) return;
       sub = await tracker.warmUp();
       if (cancelled) sub?.remove();
     });
-    return () => { cancelled = true; sub?.remove(); };
+    return () => { cancelled = true; sub?.remove(); setFocused(false); };
   }, []));
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
   const dist = active ? totalDistance(active.segments) : 0;
-  const moving = active ? sessionMovingSec(active) : 0;
-  const health = gpsHealth(fix, Date.now());
+  const moving = active ? sessionMovingSec(active, now) : 0;
+  const health = gpsHealth(fix, now);
   const gpsOk = health === 'good';
   const cur = tracker.currentSpeed();
   const laps = active?.laps ?? [];
