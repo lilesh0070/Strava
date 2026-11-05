@@ -22,6 +22,7 @@ import ShareCard, { type ShareCardHandle } from '../../components/ShareCard';
 import StoryOverlay, { type OverlayTone } from '../../components/StoryOverlay';
 import { useT } from '../../lib/i18n';
 import { availableStats, defaultStats, type ShareStatKey } from '../../lib/shareStats';
+import { activityText } from '../../lib/shareText';
 import { getActivity, getProfile } from '../../lib/storage';
 import type { Key } from '../../lib/strings';
 import { useTheme } from '../../lib/theme';
@@ -184,6 +185,19 @@ export default function ShareActivity() {
     await Clipboard.setImageAsync(b64);
     showToast(`✓ ${t('sh.copied')}`, undefined, 5000);
   });
+  /** The run as one block of text (numbers + the route drawn with dots), to paste into a story or chat. */
+  const copyText = async () => {
+    const keys: ShareStatKey[] = ['distance', 'time', 'pace', 'speed', 'steps', 'elevation', 'calories'];
+    const labels = Object.fromEntries(keys.map((k) => [k, t(`sh.${k}` as Key)])) as Record<ShareStatKey, string>;
+    const text = activityText(a, {
+      stats, labels, weightKg, route: hasRoute && showRoute,
+      dateText: new Date(a.startedAt).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }),
+    });
+    try {
+      await Clipboard.setStringAsync(text);
+      showToast(`✓ ${t('sh.copiedText')}`, undefined, 6000);
+    } catch (e) { Alert.alert(t('sh.failed'), String((e as Error)?.message ?? e)); }
+  };
   const save = () => run(async () => { await saveToGallery(await capture(mainShot)); showToast(`✓ ${t('sh.saved')}`); });
   const more = () => run(async () => { await shareSheet(await capture(mainShot), mainShot); });
   const classic = () => run(async () => { await shareSheet(await capture('card'), 'card'); });
@@ -287,6 +301,7 @@ export default function ShareActivity() {
             <NeuButton small icon="download" label={t('sh.save')} style={{ flex: 1 }} disabled={busy} onPress={save} />
             <NeuButton small icon="share-variant" label={t('sh.more')} style={{ flex: 1 }} disabled={busy} onPress={more} />
           </View>
+          <NeuButton small icon="format-text" label={t('sh.copyText')} disabled={busy} onPress={copyText} />
           {busy && <ActivityIndicator color={C.accent} />}
         </View>
 
