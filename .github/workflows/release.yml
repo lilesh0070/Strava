@@ -45,6 +45,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.handover.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -180,3 +182,18 @@ jobs:
           files: |
             dist/*.apk
             dist/update.json
+
+      - name: Hand the tag to the iPhone build
+        id: handover
+        if: env.SKIP != '1'
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # The iPhone .ipa (AltStore) is built on macOS after the APK is out, so an iOS problem can never hold
+  # up the Android release.
+  ios:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/ios.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit

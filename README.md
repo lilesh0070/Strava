@@ -9,9 +9,15 @@ The UI uses a neumorphic ("soft UI") design in light and dark. Every surface is 
 
 ## Download
 
-**[⬇ Download the latest APK](https://github.com/lilesh0070/Strava/releases/latest)** for Android. Open the link, tap `tbdi-fittrack-v….apk`, allow "install unknown apps", then tap Install.
+**Android:** **[⬇ Download the latest APK](https://github.com/lilesh0070/Strava/releases/latest)**. Open the link, tap `tbdi-fittrack-v….apk`, allow "install unknown apps", then tap Install. Once installed, new versions arrive through **Settings → Check for updates** inside the app.
 
-Once installed, new versions arrive through **Settings → Check for updates** inside the app.
+**iPhone (AltStore / SideStore, free Apple ID):** every release also has `TBDI-FitTrack-v….ipa`, an unsigned iPhone build that [AltStore](https://altstore.io) or [SideStore](https://sidestore.io) signs on your phone with your own Apple ID. Add this AltStore **source** once, and new versions show up in AltStore as updates:
+
+```
+https://github.com/lilesh0070/Strava/releases/latest/download/altstore.json
+```
+
+Limits of a free Apple ID: the app has to be refreshed every 7 days (AltStore does it automatically when AltServer is running on your computer on the same Wi-Fi; SideStore needs no computer after setup), and at most 3 sideloaded apps at a time. For many iPhone users, TestFlight with an Apple Developer account ($99/year) is the easier route.
 
 ## Workplace wellness (Health tab)
 
@@ -107,7 +113,8 @@ Wellbeing guidance only, not medical advice.
     - With a Facebook App ID set (see below), the sticker opens straight in Instagram's story editor, where you pick a photo or video.
     - Without one, the sticker is saved to your gallery and Instagram opens: pick your photo or video, then use *Stickers → Photo*.
     - For the photo, dark and orange styles, the share sheet opens; choose Instagram → Stories.
-  - **Copy:** puts the image on the clipboard, so it can be pasted from the keyboard's clipboard. **Save:** to the gallery. **More:** any app.
+  - **Copy sticker:** puts the image on the clipboard, so it can be pasted from the keyboard's clipboard. **Save:** to the gallery. **More:** any app.
+  - **Copy as text:** the whole activity as one block of plain text: name, date, the chosen numbers with emojis, and the route drawn with Braille dot characters (it keeps the route's real shape). In an Instagram story tap **Aa**, paste, and pick orange so the line matches the app's route colour. Also handy for WhatsApp and captions.
   - Choose what to show: route, distance, time, average pace and speed, steps, climb, calories, title, logo. White or dark text.
   - Exports are 1080 px wide. The classic summary card is still there.
   - **Direct Instagram stickers:** Instagram only accepts them from apps with a Facebook App ID. Create a free app at developers.facebook.com (no review needed), put its App ID in `app.json` → `expo.extra.facebookAppId`, and release a new version.
@@ -116,14 +123,17 @@ Wellbeing guidance only, not medical advice.
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.
 - **TBDI FitTrack app icon** (adaptive, with a themed Android 13+ variant) and splash screen (light and dark).
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
-- **Friends & weekly leaderboard.** Every phone gets a friend ID (Settings → Friends). Enter a friend's ID to send a request; once they accept, you both see who covered the most km this week. Friends only see your name and this week's km, never routes or locations.
+- **Friends & weekly leaderboard.** Every phone gets a friend ID (Settings → Friends). Enter a friend's ID to send a request; once they accept, you both see who covered the most km this week (also on the You tab). Friends only see your name and this week's km, never routes or locations. **Invite a friend** sends the app's download link together with your ID.
+- **Share this app.** Settings → Share this app sends a link to the newest APK (from an iPhone: the release page with the APK and the .ipa).
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports only add what is missing: they never delete anything and never overwrite activities, gear or a profile already on the phone.
 
-All data is stored on the device with AsyncStorage.
+Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and this week's km in Firebase).
 
 ## Releasing an update (all on GitHub)
 
 Everything runs on GitHub. No Expo account and no computer are needed, and it works from the GitHub mobile app.
+
+> **Always release from `main`.** Do the work on a branch, open a pull request, merge it into `main`, and only then run the release. Versions v1.3.0–v1.3.4 were once released from a side branch that never reached `main`, and the next release from `main` would have silently dropped all of that work. If a branch was ever released from, merge it into `main` before the next release.
 
 1. Open **GitHub → Actions → Release APK → Run workflow**.
 2. Type the new version (e.g. `1.2.0`) and, optionally, release notes (shown in the app's update screen). Tick **prerelease** for a test build that only phones with *Test builds* on are offered.
@@ -131,8 +141,11 @@ Everything runs on GitHub. No Expo account and no computer are needed, and it wo
    - runs the tests;
    - bumps `app.json`, then commits and tags;
    - generates the Android project and builds the APK with Gradle;
-   - publishes a **GitHub Release** with `tbdi-fittrack-v1.2.0.apk` attached.
-4. Every phone with internet then sees the update: automatically (banner) or with **Settings → Check for updates**.
+   - publishes a **GitHub Release** with `tbdi-fittrack-v1.2.0.apk` and `update.json` attached;
+   - then, in a separate job on macOS, builds the iPhone `.ipa` and attaches it together with `altstore.json` (workflow `iOS IPA (AltStore)`). If the iPhone build fails, the Android release is already out; fix it and run **Actions → iOS IPA (AltStore) → Run workflow** with the tag (e.g. `v1.2.0`).
+4. Every Android phone with internet then sees the update: automatically (banner) or with **Settings → Check for updates**. iPhones see it in AltStore.
+
+If a release run fails or is cancelled **after** the "Bump version" step, the version's tag already exists but has no release. Don't reuse that number: release the next one (e.g. `1.2.1`). Phones are only ever offered the latest *published* release.
 
 To send a tested pre-release to everyone: open it on GitHub → **Edit** → untick *Set as a pre-release*, tick *Set as the latest release* → **Update release**.
 
@@ -159,17 +172,24 @@ Optional: OTA JS updates via `eas update` still work if you set up EAS, but noth
 - **Restore** merges the backup into a new phone.
 - Connecting a phone to an existing backup is safe: its first upload merges what is already in the cloud before saving, so a new phone can't replace your history.
 
-## Friends & leaderboard setup (one time, free)
+## Friends & leaderboard (Firebase)
 
-Friend requests and the leaderboard need a small online database. Stride uses Firebase on the free
-Spark plan; the phones talk to it directly, with no server of your own.
+Friend requests and the leaderboard need a small online database. The app uses Firebase on the free
+Spark plan; the phones talk to it directly over its REST API (no Firebase SDK, no server of your own).
 
-1. Open [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (Analytics can stay off).
-2. **Build → Authentication → Get started → Sign-in method → Anonymous → Enable.**
-3. **Build → Firestore Database → Create database** (production mode; a nearby location such as `asia-south1`).
+**It is already set up** for project `stribe-a8108` (see `app.json` → `expo.extra.firebase`), with
+Anonymous sign-in on and the rules from [`firestore.rules`](firestore.rules) published. **If you change
+`firestore.rules`, publish it again** in the Firebase console (Firestore → Rules → paste → Publish); the
+app doesn't do that for you. Run `npm run test:friends` first.
+
+To move to a new Firebase project (one time, free):
+
+1. Open [console.firebase.google.com](https://console.firebase.google.com) → **Create a project** (Analytics can stay off).
+2. **Security → Authentication → Get started → Sign-in method → Anonymous → Enable → Save.**
+3. **Databases & Storage → Firestore → Create database**: Standard edition, database ID `(default)`, location `asia-south1` (Mumbai), production mode.
 4. **Firestore → Rules**: replace everything with the contents of [`firestore.rules`](firestore.rules) → **Publish**.
-5. **Project settings (gear) → General → Your apps → Web (`</>`)** → register an app, then copy `apiKey` and `projectId` from the config shown.
-6. Put them in `app.json` → `expo.extra.firebase`, then release a new APK:
+5. **Settings → General → Your apps → Web (`</>`)** → register an app, then copy `apiKey` and `projectId` from the config shown.
+6. Put them in `app.json` → `expo.extra.firebase`, then release a new version:
    ```json
    "firebase": { "apiKey": "AIza…", "projectId": "stride-12345" }
    ```
@@ -185,38 +205,80 @@ Notes:
 ## Project layout
 
 ```
+index.js                 App entry: loads the recorder (background GPS task) before Expo Router
 src/app/                 Expo Router screens
-  (tabs)/index.tsx       Feed
-  (tabs)/health.tsx      Health tab: wellness score, water, check-in, insights, weekly share
-  break.tsx              Guided desk stretch, box breathing, eye break
+  (tabs)/index.tsx       History
   (tabs)/record.tsx      Recorder
-  (tabs)/profile.tsx     Stats, goal, best efforts
+  (tabs)/health.tsx      Health tab: wellness score, water, check-in, insights, weekly share
+  (tabs)/profile.tsx     You: stats, goals, best efforts, gear
   activity/[id].tsx      Activity detail
-src/components/          RouteMap (Leaflet WebView), RouteThumb (SVG), charts
-src/lib/geo.ts           Distance, splits, elevation, best-effort maths (unit-tested)
+  share/[id].tsx         Share screen: stickers, stories, Copy sticker / Copy as text
+  friends.tsx            Friend ID, requests, weekly leaderboard
+  settings.tsx           Settings (updates, recording, reminders, backup, friends, share app)
+  break.tsx              Guided desk stretch, box breathing, eye break
+src/components/          RouteMap (Leaflet WebView), RouteThumb (SVG), StoryOverlay, charts, Neu* UI kit
+src/lib/tracker.ts       Location task + recording state machine (steps, watchdog, voice cues)
 src/lib/live.ts          Kalman filter, rolling pace, laps, pace coach, GPS health (unit-tested)
-src/lib/coach.ts         Voice cues, auto-pause rules, GPX, streaks (unit-tested)
-src/lib/tracker.ts       Location task + recording state machine
-src/lib/storage.ts       Activity persistence
-src/lib/updates.ts       OTA + GitHub-release APK updater
+src/lib/geo.ts           Distance, splits, elevation, best-effort maths (unit-tested)
+src/lib/coach.ts         Voice cues, auto-pause rules, GPX, week keys and streaks (unit-tested)
+src/lib/storage.ts       Activities, summaries, gear, profile, settings (writes are serialised)
+src/lib/blobStore.ts     Crash-safe file storage for activities and the live recording
+src/lib/backup.ts        File backup / restore (restore only adds, never overwrites)
 src/lib/githubSync.ts    Secret-Gist cloud backup
-src/lib/records.ts       PRs and weekly insights (unit-tested)
+src/lib/updates.ts       In-app updater (update.json / GitHub releases, OTA), share-app link
 src/lib/friends.ts       Friend IDs, requests, weekly leaderboard (emulator-tested with firestore.rules)
 src/lib/firebase.ts      Tiny Firebase REST client (anonymous sign-in + Firestore)
+src/lib/friendsApp.ts    Wires friends into the app (config, keystore, automatic weekly sharing)
+src/lib/shareStats.ts    Numbers on the share sticker; shareText.ts: "Copy as text" (unit-tested)
 src/lib/health.ts        Wellness score, water goal, streaks, insights, wellness badges (unit-tested)
 src/lib/breaks.ts        Stretch routine and break-reminder schedule (unit-tested)
-src/lib/wellnessStore.ts Daily wellness log storage
-plugins/withReleaseSigning.js  Release signing from CI secrets
-.github/workflows/release.yml  GitHub-only APK build + release
-src/lib/theme.tsx        Neumorphic light/dark theme
-src/components/Neu.tsx   NeuCard, NeuButton, NeuSwitch, IconWell, NeuTile…
+src/lib/strings.ts       English + Hindi texts
+modules/instagram-story  Local Expo module (Android): send a sticker to Instagram's story editor
+plugins/withReleaseSigning.js   Release signing from CI secrets
+plugins/withAsyncStorageSize.js Raises Android's AsyncStorage size limit
+firestore.rules          Who may read/write what in Firebase (publish after every change)
+scripts/friends-rules.test.ts   Friends + rules test against the Firebase emulators
+scripts/altstore-source.mjs     Writes altstore.json for the iPhone build
+.github/workflows/release.yml   Release: tests, version bump, APK, GitHub release, then the iPhone build
+.github/workflows/ios.yml       Unsigned iPhone .ipa (AltStore) on macOS
 ```
+
+## Working on the code
+
+Setup: Node 22, then `npm ci`. Start with `npx expo start` (the app uses native modules that Expo Go
+doesn't have, so test on a development build or an APK from a release).
+
+Before every pull request:
+
+- `npm run typecheck`, `npm run lint` and `npm test` must pass (the release workflow runs the tests and
+  the typecheck too and stops on a failure).
+- If you touched `src/lib/friends.ts`, `src/lib/firebase.ts` or `firestore.rules`: `npm run test:friends`
+  (needs Java; downloads the Firebase emulators the first time).
+- Add native libraries with `npx expo install <package>` so the version matches Expo SDK 58. A new
+  native library or config plugin needs a new release (APK/IPA); it can't arrive as an OTA update.
+- Keep `index.js` importing `./src/lib/tracker` before `expo-router/entry`: Android can start the app in
+  the background (no screen) to deliver GPS fixes, and the location task must be defined then.
+- `ios/` and `android/` are generated by `npx expo prebuild` (they are git-ignored). Configure native
+  things in `app.json` and `plugins/`, never by editing those folders.
+
+Branches and releases: work on a branch → pull request → merge into `main` → release from `main` (see
+*Releasing an update*). Don't leave released work on a side branch.
+
+Known gaps (good next steps):
+
+- Android release APKs are signed with the public React Native debug key unless the `ANDROID_KEYSTORE_*`
+  secrets are set; use a private key before sharing widely (switching keys needs one reinstall).
+- iPhone builds are only for AltStore/SideStore; TestFlight/App Store needs an Apple Developer account
+  and an EAS (or Xcode) signing setup.
+- Direct Instagram story stickers on iPhone aren't implemented (the sticker is saved to the gallery and
+  Instagram opens instead).
 
 ## Scripts
 
-- `npm test`: unit tests for the geo maths, live tracking, coach, records and wellness helpers
+- `npm test`: unit tests (geo maths, live tracking, coach, records, wellness, sharing, friends helpers)
 - `npm run typecheck`
 - `npm run lint`: ESLint via `expo lint`
+- `npm run test:friends`: friends + Firestore rules against the Firebase emulators
 
 ## Roadmap ideas
 

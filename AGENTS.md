@@ -39,3 +39,20 @@ Docs: https://docs.expo.dev/eas/index.md
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+## This repository (TBDI FitTrack)
+
+Read README.md → "Working on the code" and "Releasing an update" first. The rules that matter most:
+
+- **Release only from `main`.** Work on a branch, open a PR, merge into `main`, then run the "Release APK"
+  workflow (it also builds the iPhone .ipa). Never leave released work on a side branch: once, v1.3.0–v1.3.4
+  were released from a branch that never reached `main` and had to be merged back by hand.
+- If a release run fails or is cancelled after its "Bump version" step, that tag exists without a release:
+  release the next version number instead of reusing it.
+- Before a PR: `npm run typecheck`, `npm run lint`, `npm test`. If friends/Firebase code or `firestore.rules`
+  changed: `npm run test:friends`, and publish the new rules in the Firebase console (project `stribe-a8108`).
+- `index.js` must import `./src/lib/tracker` before `expo-router/entry` (the background GPS task has to be
+  defined when Android starts the app without a screen).
+- Storage: activities and the live recording live in files (`src/lib/blobStore.ts`); writes in
+  `src/lib/storage.ts` go through its `serial()` queue; a restore must never overwrite existing local data.
+- `docs.expo.dev` may be unreachable from cloud sessions; check APIs in `node_modules/<package>/build/*.d.ts`.
