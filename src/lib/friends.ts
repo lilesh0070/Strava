@@ -75,6 +75,10 @@ export function createFriends(d: { client: FirebaseClient; kv: KV; stats: () => 
   async function enable(): Promise<string> {
     const uid = await d.client.signIn();
     let { code } = await loadLocal();
+    // The friend ID is kept in AsyncStorage, the sign-in in SecureStore. Android's backup restores only the
+    // first, so on a new phone the stored ID belongs to the old account and the rules reject every profile
+    // write that uses it: get a new ID instead of failing for good.
+    if (code && (await d.client.get(`codes/${code}`))?.uid !== uid) code = undefined;
     if (!code) {
       const prof = await d.client.get(`profiles/${uid}`); // account kept but local data cleared
       if (typeof prof?.code === 'string') code = prof.code;
