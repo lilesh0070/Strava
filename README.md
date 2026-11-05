@@ -224,10 +224,14 @@ src/app/                 Expo Router screens
   (tabs)/profile.tsx     You: stats, goals, best efforts, gear
   activity/[id].tsx      Activity detail
   share/[id].tsx         Share screen: stickers, stories, Copy sticker / Copy as text
-  friends.tsx            Friend ID, requests, weekly leaderboard
+  friends.tsx            Friend ID, requests, week / month / all-time leaderboard
   settings.tsx           Settings (updates, recording, reminders, backup, friends, share app)
   break.tsx              Guided desk stretch, box breathing, eye break
 src/components/          RouteMap (Leaflet WebView), RouteThumb (SVG), StoryOverlay, charts, Neu* UI kit
+  Neu.tsx                Neumorphic UI kit (NeuButton/Card/Switch/Progress…): spring press, busy/disabled states
+  ToastHost.tsx          Bottom snackbar (Undo after delete / discard)
+  CelebrationOverlay.tsx Animated "new record / badge" card with confetti (store: src/lib/celebrate.ts)
+  WeekRecapCard.tsx      "My week" share card (numbers: src/lib/weekRecap.ts)
 src/lib/tracker.ts       Location task + recording state machine (steps, watchdog, voice cues)
 src/lib/live.ts          Kalman filter, distance stage (still state, gaps, no-Doppler smoother), laps, pace coach (unit-tested)
 src/lib/liveNotification.ts  Android lock-screen stats notification; liveText.ts builds its text (unit-tested)
@@ -241,22 +245,84 @@ src/lib/blobStore.ts     Crash-safe file storage for activities and the live rec
 src/lib/backup.ts        File backup / restore (restore only adds, never overwrites)
 src/lib/githubSync.ts    Secret-Gist cloud backup
 src/lib/updates.ts       In-app updater (update.json / GitHub releases, OTA), share-app link
-src/lib/friends.ts       Friend IDs, requests, weekly leaderboard (emulator-tested with firestore.rules)
+src/lib/friends.ts       Friend IDs, requests, leaderboard (emulator-tested with firestore.rules; weekly-only fallback for old rules)
 src/lib/firebase.ts      Tiny Firebase REST client (anonymous sign-in + Firestore)
 src/lib/friendsApp.ts    Wires friends into the app (config, keystore, automatic weekly sharing)
 src/lib/shareStats.ts    Numbers on the share sticker; shareText.ts: "Copy as text" (unit-tested)
 src/lib/health.ts        Wellness score, water goal, streaks, insights, wellness badges (unit-tested)
 src/lib/breaks.ts        Stretch routine and break-reminder schedule (unit-tested)
-src/lib/strings.ts       English + Hindi texts
+src/lib/strings.ts       English + Hindi texts (every key in both; strings.test.ts checks it); i18n.tsx: useT, sportName, prLabel, badgeTitle
 modules/instagram-story  Local Expo module (Android): send a sticker to Instagram's story editor
 plugins/withReleaseSigning.js   Release signing from CI secrets
 plugins/withAsyncStorageSize.js Raises Android's AsyncStorage size limit
 firestore.rules          Who may read/write what in Firebase (publish after every change)
 scripts/friends-rules.test.ts   Friends + rules test against the Firebase emulators
+scripts/sim/             Node harness for the recording engine: loader + stubs, tracker.test.ts, gps-sim.ts, autopause-sim.ts
+scripts/check-i18n.mjs   Fails on English-only UI strings in src/app and src/components
+scripts/vendor-leaflet.mjs      Regenerates src/lib/leafletSrc.ts from the leaflet devDependency
+scripts/test-resolve.mjs        Lets `node --test` resolve extensionless imports like Metro
 scripts/altstore-source.mjs     Writes altstore.json for the iPhone build
 .github/workflows/release.yml   Release: tests, version bump, APK, GitHub release, then the iPhone build
 .github/workflows/ios.yml       Unsigned iPhone .ipa (AltStore) on macOS
 ```
+
+## Rules for changing the code
+
+Read this before touching the parts below; each rule exists because breaking it caused a real bug.
+
+**GPS / distance (`src/lib/live.ts`, `src/lib/tracker.ts`)**
+- The headline distance is `session.distanceM`, and it only grows through `distanceStep()`, which is called
+  for **every filtered fix** (not only for the points kept for the route). Never add distance from the gap
+  between two stored points: that integrated whole stops into the total.
+- Stored points are for the map only (smoothed, ≥ 3 m apart, none while standing). Each one carries `d`,
+  the recorded distance when it was stored; `cumulative()`, `splits()`, `bestEffort()`, `speedSeries()` and
+  `totalDistance()` read `d` when every point has it, and fall back to chords for activities from before
+  v1.3.9. Keep writing `d` on every pushed point, and when a segment ends call `settleDistance()` (it also
+  updates the last point's `d`), otherwise the splits stop matching the headline.
+- Speed 0 means two things: iPhones report speed 0 with course −1 when standing (a real stop); Android
+  reports 0 / 0 both for a stop and for "this fix has no speed" (phones without Doppler). `fixVelocity()`
+  tells them apart with `recentDoppler`; don't simplify it to "0 = stopped" (it pinned budget phones' walks
+  at zero) or "0 = unknown" (it made every iPhone stop creep).
+- The "still" state (`STILL_MS` 0.25 m/s on 3 fixes to enter, `MOVING_MS` 0.8 m/s on 2 fixes, 5 slow-moving
+  fixes or a real move to leave) decides when a stop counts as 0 m. A 0.5 m/s hiker must not be clipped by it.
+- Auto-pause is off for hikes on purpose, and auto-resume needs three fixes beyond the threshold (or one
+  accurate fix): a single multipath jump must not resume.
+- After changing any of this, run `npm run test:tracker`, `npm run sim:gps` and `npm run sim:autopause`
+  and compare with the numbers in *Precise live tracking* above (mean error ≈ 0.7 / 1.0 / 2.0 %, standing
+  10 min < 10 m, 6 stops → 6 pauses). Put a new scenario in `scripts/sim/gps-sim.ts` when you fix a case.
+- The session is persisted and restored after an app kill **and after an app update**. A new `Session` or
+  `DistanceState` field must be optional and the code must work when it is missing.
+- If you change what `bestEffort()` returns, bump `EFFORTS_V` in `src/lib/storage.ts` so the cached
+  efforts in list summaries are rebuilt once.
+
+**Texts and languages**
+- Every user-facing string goes through `t('key')` with an English and a Hindi value in `src/lib/strings.ts`
+  (`npm test` fails if a Hindi value or a `{placeholder}` is missing; `npm run check:i18n` fails on new
+  English literals in screens).
+- Stored data stays English: badge `title`, `PersonalRecord.label`, `workoutName` on activities. Screens
+  translate at render with `badgeTitle(t, id)`, `prLabel(t, record)`, `t(workout.nameKey)`. Workout voice
+  cues are English on purpose. New activity names use the app language (`defaultName(sport, startedAt, lang)`).
+
+**Settings**
+- A new setting needs a default in `DEFAULT_SETTINGS` (`src/lib/types.ts`); `getSettings()` merges stored
+  settings over the defaults, so phones updating from an older version get the default.
+
+**Friends (Firebase)**
+- A new field on `profiles/{uid}` must be allowed in `firestore.rules`, tested with `npm run test:friends`,
+  and the rules **published in the Firebase console**. Until they are published, the old rules reject the
+  write; `share()` then falls back to the weekly fields and retries every 6 hours (keep that fallback when
+  you add fields).
+
+**Map**
+- Leaflet is inlined from `src/lib/leafletSrc.ts` (generated: don't edit it, don't go back to a CDN `<script>`,
+  which left the map blank offline). After bumping the `leaflet` devDependency run `node scripts/vendor-leaflet.mjs`.
+- The map page starts at opacity 0 and fades in on the first position or route; it posts `tiles-offline` /
+  `tiles-online` to the app.
+
+**Notifications**
+- The Android lock-screen stats use their own silent channel `live` and carry `data.live = true`, which
+  the handler in `src/app/_layout.tsx` uses to never show them as a banner. Other notifications (reminders)
+  keep `data.url` to open a screen when tapped.
 
 ## Working on the code
 
@@ -267,7 +333,7 @@ Before every pull request:
 
 - `npm run typecheck`, `npm run lint`, `npm test` and `npm run check:i18n` must pass (the release workflow
   runs the tests and the typecheck too and stops on a failure). Every user-facing string goes through
-  `t('key')` with an English and a Hindi value in `src/lib/strings.ts`.
+  `t('key')` with an English and a Hindi value in `src/lib/strings.ts`. Read *Rules for changing the code* first.
 - If you touched `src/lib/tracker.ts` or `src/lib/live.ts`: `npm run test:tracker` (the recording engine
   end to end under Node) and `npm run sim:gps` (distance error of the real tracker over synthetic routes
   for Android, iPhone and no-Doppler phones; keep the means near 0.7 / 1.0 / 2.0 % and the 10-minute
@@ -295,7 +361,7 @@ Known gaps (good next steps):
 
 ## Scripts
 
-- `npm test`: unit tests (geo maths, live tracking, coach, records, wellness, sharing, friends helpers)
+- `npm test`: unit tests (geo maths, live tracking, coach, records, wellness, sharing, week recap, strings, friends helpers)
 - `npm run typecheck`
 - `npm run lint`: ESLint via `expo lint`
 - `npm run test:friends`: friends + Firestore rules against the Firebase emulators
