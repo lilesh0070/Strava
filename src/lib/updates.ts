@@ -66,6 +66,21 @@ async function stableRelease(): Promise<ApkRelease | null> {
   return fromApiRelease(await r.json());
 }
 
+/**
+ * Link for someone who doesn't have the app yet: the newest APK itself (from the release's update.json),
+ * or the release page when that can't be read (offline, or an old release without the manifest).
+ */
+export async function latestApkLink(): Promise<string> {
+  const page = `https://github.com/${repo()}/releases/latest`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(`https://github.com/${repo()}/releases/latest/download/update.json`, { headers: NO_CACHE, signal: ctrl.signal });
+    if (res.ok) { const m = fromManifest(JSON.parse(await res.text())); if (m) return m.url; }
+  } catch { /* offline or not a manifest: the release page always works */ } finally { clearTimeout(timer); }
+  return page;
+}
+
 /** Newest release including test builds (pre-releases), for testers. */
 async function testRelease(): Promise<ApkRelease | null> {
   const r = await api('/releases?per_page=15');
