@@ -135,6 +135,7 @@ const en = {
   'set.every': 'Remind every', 'set.workHours': 'Work hours', 'set.workDays': 'Work days', 'set.monFri': 'Mon–Fri', 'set.monSat': 'Mon–Sat',
   'sc.week': 'My wellness week', 'sc.active': 'ACTIVE MIN', 'sc.water': 'WATER GOAL', 'sc.breaks': 'BREAKS', 'sc.sleep': 'AVG SLEEP',
   'sc.score': 'AVG SCORE', 'sc.join': 'Join me on TBDI FitTrack',
+  'sh.tplMap': 'Map', 'sh.tplCard': 'App card', 'sh.tagline': 'Move • Monitor • Stay Healthy',
   'sh.tplClear': 'Transparent', 'sh.tplPhoto': 'Your photo', 'sh.tplDark': 'Dark', 'sh.tplOrange': 'Orange',
   'sh.swipe': 'Swipe for more styles', 'sh.addPhoto': 'Tap to choose a photo', 'sh.igStory': 'Instagram Story',
   'sh.copy': 'Copy sticker', 'sh.more': 'More', 'sh.copied': 'Copied. In Instagram, paste it from your keyboard’s clipboard.',
@@ -407,6 +408,7 @@ const hi: Partial<Record<Key, string>> = {
   'set.every': 'हर कितनी देर में', 'set.workHours': 'काम के घंटे', 'set.workDays': 'काम के दिन', 'set.monFri': 'सोम–शुक्र', 'set.monSat': 'सोम–शनि',
   'sc.week': 'मेरा वेलनेस हफ़्ता', 'sc.active': 'एक्टिव मिनट', 'sc.water': 'पानी लक्ष्य', 'sc.breaks': 'ब्रेक', 'sc.sleep': 'औसत नींद',
   'sc.score': 'औसत स्कोर', 'sc.join': 'TBDI FitTrack पर मेरे साथ जुड़ें',
+  'sh.tplMap': 'मैप', 'sh.tplCard': 'ऐप कार्ड', 'sh.tagline': 'Move • Monitor • Stay Healthy', // the brand line stays English
   'sh.tplClear': 'ट्रांसपेरेंट', 'sh.tplPhoto': 'आपकी फ़ोटो', 'sh.tplDark': 'गहरा', 'sh.tplOrange': 'ऑरेंज',
   'sh.swipe': 'और स्टाइल के लिए स्वाइप करें', 'sh.addPhoto': 'फ़ोटो चुनने के लिए टैप करें', 'sh.igStory': 'इंस्टाग्राम स्टोरी',
   'sh.copy': 'स्टिकर कॉपी', 'sh.more': 'और', 'sh.copied': 'कॉपी हो गया। इंस्टाग्राम में कीबोर्ड के क्लिपबोर्ड से पेस्ट करें।',

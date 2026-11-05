@@ -37,7 +37,17 @@ export const useUpdateState = () => useSyncExternalStore(subscribe, () => state)
 export const getUpdateState = () => state;
 
 export const currentVersion = () => Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? '0.0.0';
-export const currentBuildId = () => Updates.updateId?.slice(0, 8) ?? (Updates.isEmbeddedLaunch ? 'embedded' : 'dev');
+/**
+ * Build label for Settings: the native build number (Android versionCode / iOS build), plus the OTA update id
+ * when one is running. "dev" only in a development build (it used to show "dev" in every release: OTA is off,
+ * so expo-updates never reports an embedded launch).
+ */
+export const currentBuildId = () => {
+  if (__DEV__) return 'dev';
+  const native = Application.nativeBuildVersion ?? '';
+  const ota = Updates.isEnabled && !Updates.isEmbeddedLaunch ? Updates.updateId?.slice(0, 8) : undefined;
+  return [native, ota && `OTA ${ota}`].filter(Boolean).join(' · ') || currentVersion();
+};
 const extra = () => (Constants.expoConfig?.extra ?? {}) as { updateRepo?: string; signer?: string };
 const repo = () => extra().updateRepo ?? 'lilesh0070/strava';
 /** Fingerprint of the key this build was signed with (written into app.json by the release workflow). */
