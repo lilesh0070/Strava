@@ -50,10 +50,12 @@ export function rankBoard(rows: Omit<BoardRow, 'rank'>[]): BoardRow[] {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const LEGACY_RETRY_MS = 6 * 3600_000;
 
 export function createFriends(d: { client: FirebaseClient; kv: KV; stats: () => Promise<MyStats>; now?: () => number }) {
   const now = d.now ?? Date.now;
-  type Local = { code?: string; shared?: MyStats };
+  /** legacyUntil: the published rules rejected the month/all-time fields; write the weekly ones only until then. */
+  type Local = { code?: string; shared?: MyStats; legacyUntil?: number };
   let local: Local | null = null;
   const loadLocal = async (): Promise<Local> => (local ??= JSON.parse((await d.kv.get()) ?? '{}') as Local);
   const saveLocal = async (patch: Partial<Local>) => {
@@ -101,14 +103,29 @@ export function createFriends(d: { client: FirebaseClient; kv: KV; stats: () => 
           const s = await d.stats();
           const l = await loadLocal();
           const p = l.shared;
+          const legacy = l.legacyUntil != null && now() < l.legacyUntil;
           const changed = !p || p.name !== s.name || p.weekStart !== s.weekStart || Math.abs(p.weekKm - s.weekKm) >= 0.005
-            || p.monthStart !== s.monthStart || Math.abs((p.monthKm ?? -1) - s.monthKm) >= 0.005 || Math.abs((p.totalKm ?? -1) - s.totalKm) >= 0.005;
+            || p.monthStart !== s.monthStart || Math.abs((p.monthKm ?? -1) - s.monthKm) >= 0.005 || Math.abs((p.totalKm ?? -1) - s.totalKm) >= 0.005
+            || (l.legacyUntil != null && !legacy); // time to try the full profile again
           if (force || changed) {
-            await d.client.set(`profiles/${await me()}`, {
-              code: l.code!, name: s.name.slice(0, 40), weekKm: round2(Math.max(0, s.weekKm)), weekStart: s.weekStart,
-              monthKm: round2(Math.max(0, s.monthKm)), monthStart: s.monthStart, totalKm: round2(Math.max(0, s.totalKm)), updatedAt: now(),
-            });
-            await saveLocal({ shared: { ...s } });
+            const path = `profiles/${await me()}`;
+            const week = { code: l.code!, name: s.name.slice(0, 40), weekKm: round2(Math.max(0, s.weekKm)), weekStart: s.weekStart, updatedAt: now() };
+            const full = { ...week, monthKm: round2(Math.max(0, s.monthKm)), monthStart: s.monthStart, totalKm: round2(Math.max(0, s.totalKm)) };
+            if (legacy) await d.client.set(path, week);
+            else {
+              try {
+                await d.client.set(path, full);
+              } catch (e) {
+                // Rules published before v1.3.9 only allow the weekly fields: keep the weekly board working until
+                // the new firestore.rules is published (tried again every few hours; month / all-time then fill in).
+                if (!(e instanceof FirebaseError && e.status === 403)) throw e;
+                await d.client.set(path, week);
+                await saveLocal({ shared: { ...s }, legacyUntil: now() + LEGACY_RETRY_MS });
+                force = false;
+                continue;
+              }
+            }
+            await saveLocal(legacy ? { shared: { ...s } } : { shared: { ...s }, legacyUntil: undefined });
           }
           force = false;
         } while (again);
