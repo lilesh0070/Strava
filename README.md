@@ -188,8 +188,8 @@ password somewhere safe: **if the key is lost, phones can't update again without
 
 Switching keys: Android only installs an update signed with the same key, so each phone reinstalls once.
 Every release writes the signing certificate's SHA-256 fingerprint into the app and into `update.json`
-(step *Signing fingerprint*); from v1.3.11 on the app notices a key change and shows the steps (back up,
-download the new APK, uninstall, install, restore) instead of a failing installer. So: release v1.3.11 or
+(step *Signing fingerprint*); from v1.3.10 on the app notices a key change and shows the steps (back up,
+download the new APK, uninstall, install, restore) instead of a failing installer. So: release v1.3.10 or
 newer with the old key first, let phones update to it, then add the secrets and release the next version.
 The run log shows the fingerprint it signed with.
 

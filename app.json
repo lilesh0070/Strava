@@ -16,6 +16,9 @@
           "location",
           "audio"
         ]
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -78,7 +81,12 @@
           ]
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "enableRemoteNotifications": false
+        }
+      ],
       "./plugins/withReleaseSigning",
       "./plugins/withAsyncStorageSize",
       [
