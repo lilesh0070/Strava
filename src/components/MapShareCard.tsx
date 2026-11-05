@@ -7,7 +7,7 @@
 // preview and the 1080 px export look the same. Without internet the map is left out and the rest still works.
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { forwardRef, useEffect, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useId, useMemo, useRef } from 'react';
 import { Image, PixelRatio, Text, View, type TextStyle } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Polyline, Rect, Stop } from 'react-native-svg';
 import { simplify } from '../lib/geo';
@@ -36,6 +36,8 @@ const MapShareCard = forwardRef<ShareCardHandle, Props>(function MapShareCard(
   const { C, S } = useTheme();
   const { t } = useT();
   const k = width / 360; // design unit
+  // several cards are on screen at once (pages + the export): each needs its own gradient id
+  const fadeId = `fade${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const info = sportInfo(a.sport);
   const segs = useMemo(() => a.segments.filter((s) => s.length > 1).map((s) => simplify(s, 2)), [a.segments]);
   const rows = statRows(stats.length ? stats : (['distance', 'time'] as ShareStatKey[]));
@@ -46,12 +48,20 @@ const MapShareCard = forwardRef<ShareCardHandle, Props>(function MapShareCard(
   const statsH = rows.length * 64 * k + 28 * k;
   // 'card': the map frame sits between the header and the stats panel
   const frame: Box = variant === 'card'
-    ? { x: pad, y: pad + 46 * k + 18 * k, w: width - 2 * pad, h: height - 2 * pad - 46 * k - 18 * k - statsH - 18 * k - 40 * k }
+    ? { x: pad, y: pad + 46 * k + 18 * k, w: width - 2 * pad, h: height - 2 * pad - 46 * k - statsH - 40 * k - 3 * 18 * k } // 4 children, 3 gaps
     : { x: 0, y: 0, w: width, h: height };
   const inset = variant === 'card' ? 6 * k : 0; // the map inside the sunken frame
   const mapBox: Box = { x: 0, y: 0, w: frame.w - 2 * inset, h: frame.h - 2 * inset };
-  // where the route is fitted: the upper part of a 'map' story (the lower part is the fade with the numbers)
-  const fit: Box = variant === 'map' ? { x: 26 * k, y: height * 0.14, w: width - 52 * k, h: height * 0.44 } : { x: 0, y: 0, w: mapBox.w, h: mapBox.h };
+  // 'map': the text block grows upward from the bottom with the number of stat rows; the dark fade starts just
+  // above it and the route is fitted into the clear map above that, so text never sits on the bare map
+  const rowH = (n: number) => 16 * k + (n === 1 ? 40 : n === 2 ? 34 : 26) * k * 1.22;
+  const blockH = 50 * k + rows.reduce((s, r) => s + rowH(r.length), 0) + (showLogo ? 26 * k : 0)
+    + 18 * k * (rows.length + (showLogo ? 1 : 0)) + 30 * k;
+  const textTop = Math.max(height * 0.3, height - blockH);
+  const fadeFrom = Math.max(0.13, (textTop - 90 * k) / height), fadeFull = Math.max(fadeFrom + 0.05, textTop / height);
+  const fit: Box = variant === 'map'
+    ? { x: 26 * k, y: height * 0.12, w: width - 52 * k, h: Math.max(height * 0.2, textTop - 70 * k - height * 0.12) }
+    : { x: 0, y: 0, w: mapBox.w, h: mapBox.h };
   const tiles = useMemo(
     () => (segs.length ? layoutTiles(segs.flat(), { w: mapBox.w, h: mapBox.h }, fit, PixelRatio.get(), { pad: variant === 'map' ? 0.06 : 0.14 }) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,13 +93,14 @@ const MapShareCard = forwardRef<ShareCardHandle, Props>(function MapShareCard(
   const route = variant === 'map' ? BRAND : C.route;
 
   const map = (
-    <View style={{ width: mapBox.w, height: mapBox.h, overflow: 'hidden', backgroundColor: light ? '#E4E8EE' : '#2B3038' }}>
+    <View style={{ width: mapBox.w, height: mapBox.h, overflow: 'hidden',
+      backgroundColor: !tiles ? (variant === 'map' ? '#111318' : C.bg) : light ? '#E4E8EE' : '#2B3038' }}>
       {tiles?.tiles.map((tl) => (
         <Image key={tl.key} source={{ uri: tl.url, headers: { 'User-Agent': UA } }} fadeDuration={0}
           onLoadEnd={() => settle(tl.key)} onError={() => settle(tl.key)}
           style={{ position: 'absolute', left: tl.left, top: tl.top, width: tiles.size + 0.5, height: tiles.size + 0.5 }} />
       ))}
-      <View style={{ position: 'absolute', left: 0, top: 0, width: mapBox.w, height: mapBox.h, backgroundColor: wash }} />
+      {tiles && <View style={{ position: 'absolute', left: 0, top: 0, width: mapBox.w, height: mapBox.h, backgroundColor: wash }} />}
       {lines.length > 0 && (
         <Svg width={mapBox.w} height={mapBox.h} style={{ position: 'absolute', left: 0, top: 0 }}>
           {lines.map((pts, i) => (
@@ -131,15 +142,15 @@ const MapShareCard = forwardRef<ShareCardHandle, Props>(function MapShareCard(
         {/* the fade that carries the text: clear over the route, dark at the bottom */}
         <Svg width={width} height={height} style={{ position: 'absolute', left: 0, top: 0 }}>
           <Defs>
-            <LinearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+            <LinearGradient id={fadeId} x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor="#111318" stopOpacity={0.18} />
               <Stop offset="0.12" stopColor="#111318" stopOpacity={0} />
-              <Stop offset="0.55" stopColor="#111318" stopOpacity={0} />
-              <Stop offset="0.72" stopColor="#111318" stopOpacity={0.8} />
+              <Stop offset={String(fadeFrom)} stopColor="#111318" stopOpacity={0} />
+              <Stop offset={String(Math.min(0.99, fadeFull))} stopColor="#111318" stopOpacity={0.84} />
               <Stop offset="1" stopColor="#111318" stopOpacity={0.97} />
             </LinearGradient>
           </Defs>
-          <Rect x={0} y={0} width={width} height={height} fill="url(#fade)" />
+          <Rect x={0} y={0} width={width} height={height} fill={`url(#${fadeId})`} />
         </Svg>
         <View style={{ position: 'absolute', left: 28 * k, right: 28 * k, bottom: 30 * k, gap: 18 * k }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 * k }}>

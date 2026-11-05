@@ -127,9 +127,11 @@ export default function ShareActivity() {
   if (a === undefined) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
   if (!a) return <Text style={[F.body, { padding: 20 }]}>{t('act.notFound')}</Text>;
 
-  const tpl = TEMPLATES[page];
-  const isSticker = tpl.key === 'clear';
   const hasRoute = a.segments.some((s) => s.length > 1);
+  // the map styles need a route (manual / indoor activities have none): those start on the sticker
+  const templates = hasRoute ? TEMPLATES : TEMPLATES.filter((x) => !isMapTpl(x.key));
+  const tpl = templates[Math.min(page, templates.length - 1)];
+  const isSticker = tpl.key === 'clear';
   const layout = !hasRoute || !showRoute ? 'stats' : stats.length ? 'full' : 'route';
   // the app's orange route everywhere, except on the orange style where it would vanish
   const routeFor = (tp: Template) => (tp.key === 'orange' ? '#FFFFFF' : C.route);
@@ -277,15 +279,15 @@ export default function ShareActivity() {
       <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingVertical: 16, gap: 16, paddingBottom: 50 }}>
         {/* swipe through styles */}
         <FlatList
-          data={TEMPLATES}
+          data={templates}
           keyExtractor={(x) => x.key}
           renderItem={renderPage}
           extraData={[photo, showRoute, tone, size, stats, showTitle, showLogo, pos, ovH, clearH, page, C.route, C.scheme, weightKg]}
           horizontal pagingEnabled showsHorizontalScrollIndicator={false}
-          scrollEnabled={!dragging}
+          scrollEnabled={!dragging && !busy} // an export in progress must not lose (or swap) its off-screen card
           scrollEventThrottle={50}
           onScroll={(e) => {
-            const i = clamp(Math.round(e.nativeEvent.contentOffset.x / width), 0, TEMPLATES.length - 1);
+            const i = clamp(Math.round(e.nativeEvent.contentOffset.x / width), 0, templates.length - 1);
             if (i !== page) setPage(i);
           }}
           getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
@@ -293,7 +295,7 @@ export default function ShareActivity() {
         />
         <View style={{ alignItems: 'center', gap: 6 }}>
           <View style={{ flexDirection: 'row', gap: 6 }}>
-            {TEMPLATES.map((x, i) => (
+            {templates.map((x, i) => (
               <View key={x.key} style={{ width: i === page ? 18 : 7, height: 7, borderRadius: 4, backgroundColor: i === page ? C.accent : C.faint }} />
             ))}
           </View>
