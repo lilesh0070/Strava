@@ -201,6 +201,36 @@ export default function SettingsScreen() {
             {s.targetPaceSec ? <NeuButton small label="Off" onPress={() => { setPaceText(''); set({ targetPaceSec: null }); }} /> : null}
           </View>
         </NeuCard>
+        <NeuCard radius={26} style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconWell icon="flag-outline" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>{t('set.autoLap')}</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>{t('set.autoLapSub')}</Text>
+            </View>
+          </View>
+          <NeuSegmented value={String(s.autoLapKm ?? 0)} onChange={(v) => set({ autoLapKm: Number(v) || null })}
+            options={[{ key: '0', label: t('set.off') }, { key: '1', label: '1 km' }, { key: '2', label: '2 km' }, { key: '5', label: '5 km' }]} />
+        </NeuCard>
+        <NeuCard radius={26} style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconWell icon="bullseye-arrow" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>{t('set.targets')}</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>{t('set.targetsSub')}</Text>
+            </View>
+          </View>
+          <View style={{ gap: 8 }}>
+            <Text style={F.label}>{t('set.targetDist')}</Text>
+            <NeuSegmented value={String(s.targetDistanceM ?? 0)} onChange={(v) => set({ targetDistanceM: Number(v) || null })}
+              options={[{ key: '0', label: t('set.off') }, { key: '3000', label: '3 km' }, { key: '5000', label: '5 km' }, { key: '10000', label: '10 km' }, { key: '21097', label: '21.1' }]} />
+          </View>
+          <View style={{ gap: 8 }}>
+            <Text style={F.label}>{t('set.targetTime')}</Text>
+            <NeuSegmented value={String(s.targetTimeSec ?? 0)} onChange={(v) => set({ targetTimeSec: Number(v) || null })}
+              options={[{ key: '0', label: t('set.off') }, { key: '1200', label: `20 ${t('set.minutes')}` }, { key: '1800', label: `30 ${t('set.minutes')}` }, { key: '3600', label: `60 ${t('set.minutes')}` }]} />
+          </View>
+        </NeuCard>
         {Platform.OS === 'android' && (
           <NeuTile icon="battery-heart-variant" title="Reliable background recording"
             subtitle="Set TBDI FitTrack to “Unrestricted” battery use so Android never stops a recording"

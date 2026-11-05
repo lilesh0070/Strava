@@ -40,6 +40,11 @@ const en = {
   'you.bestEfforts': 'Best efforts', 'you.weight': 'Body weight', 'you.weightSub': 'Used only to estimate calories, stays on this phone',
   'add.checkDist': 'Check distance', 'add.checkDistBody': 'Enter kilometres, e.g. 5.2', 'add.checkDur': 'Check duration',
   'add.checkDurBody': 'Enter minutes (45), mm:ss (32:10) or h:mm:ss (1:05:30)', 'add.couldNotSave': 'Could not save',
+  'set.autoLap': 'Auto lap', 'set.autoLapSub': 'Close a lap automatically, with a voice summary', 'set.off': 'Off',
+  'set.targets': 'Targets for the next activity', 'set.targetsSub': 'A one-time voice cue when you reach it',
+  'set.targetDist': 'Distance', 'set.targetTime': 'Time', 'set.minutes': 'min',
+  'rec.targetBar': 'Target', 'rec.weekBar': 'This week',
+  'fr.week': 'Week', 'fr.month': 'Month', 'fr.allTime': 'All-time',
   'rec.approx': 'Approximate location · tap to fix', 'rec.locOff': 'Location is off · tap to fix',
   'rec.approxTitle': 'Precise location is off',
   'rec.approxBody': 'TBDI FitTrack only gets an approximate position, so your route and distance can be off by hundreds of metres. Turn on “Use precise location” for TBDI FitTrack.',
@@ -192,6 +197,11 @@ const hi: Partial<Record<Key, string>> = {
   'you.bestEfforts': 'बेस्ट एफ़र्ट', 'you.weight': 'शरीर का वज़न', 'you.weightSub': 'सिर्फ़ कैलोरी के अनुमान के लिए, इसी फ़ोन में रहता है',
   'add.checkDist': 'दूरी जाँचें', 'add.checkDistBody': 'किलोमीटर डालें, जैसे 5.2', 'add.checkDur': 'समय जाँचें',
   'add.checkDurBody': 'मिनट (45), mm:ss (32:10) या h:mm:ss (1:05:30) डालें', 'add.couldNotSave': 'सेव नहीं हो पाया',
+  'set.autoLap': 'ऑटो लैप', 'set.autoLapSub': 'हर तय दूरी पर लैप अपने आप, आवाज़ में सारांश के साथ', 'set.off': 'बंद',
+  'set.targets': 'अगली एक्टिविटी के लक्ष्य', 'set.targetsSub': 'लक्ष्य पूरा होने पर एक बार आवाज़ में बताएगा',
+  'set.targetDist': 'दूरी', 'set.targetTime': 'समय', 'set.minutes': 'मिनट',
+  'rec.targetBar': 'लक्ष्य', 'rec.weekBar': 'इस हफ़्ते',
+  'fr.week': 'हफ़्ता', 'fr.month': 'महीना', 'fr.allTime': 'अब तक',
   'rec.approx': 'अनुमानित लोकेशन · ठीक करने के लिए टैप करें', 'rec.locOff': 'लोकेशन बंद है · ठीक करने के लिए टैप करें',
   'rec.approxTitle': 'सटीक लोकेशन बंद है',
   'rec.approxBody': 'TBDI FitTrack को सिर्फ़ अनुमानित लोकेशन मिल रही है, इसलिए रास्ता और दूरी सैकड़ों मीटर ग़लत हो सकती है। TBDI FitTrack के लिए “सटीक लोकेशन” चालू करें।',
@@ -329,8 +339,12 @@ export function kmCueHi(km: number, movingSec: number, usesPace: boolean) {
 
 export const voicePhrases = {
   en: { paused: 'Auto paused', resumed: 'Resumed', faster: 'Pick up the pace', slower: 'Ease off a little, you are ahead of target',
-    lap: (no: number, km: string, sec: number) => { const s = Math.round(sec); return `Lap ${no}. ${km} kilometres in ${n(Math.floor(s / 60), 'minute', 'minutes')} ${n(s % 60, 'second', 'seconds')}.`; } },
+    lap: (no: number, km: string, sec: number) => { const s = Math.round(sec); return `Lap ${no}. ${km} kilometres in ${n(Math.floor(s / 60), 'minute', 'minutes')} ${n(s % 60, 'second', 'seconds')}.`; },
+    targetDistance: (km: string) => `Target reached: ${km} kilometres. Well done!`,
+    targetTime: (min: number) => `Target reached: ${n(min, 'minute', 'minutes')}. Well done!` },
   hi: { paused: 'ऑटो पॉज़', resumed: 'फिर से शुरू', faster: 'थोड़ा तेज़ चलिए', slower: 'थोड़ा धीमे, आप टारगेट से आगे हैं',
-    lap: (no: number, km: string, sec: number) => `लैप ${no}। ${km} किलोमीटर, ${spokenDurationHi(sec)} में।` },
+    lap: (no: number, km: string, sec: number) => `लैप ${no}। ${km} किलोमीटर, ${spokenDurationHi(sec)} में।`,
+    targetDistance: (km: string) => `लक्ष्य पूरा: ${km} किलोमीटर। शाबाश!`,
+    targetTime: (min: number) => `लक्ष्य पूरा: ${min} मिनट। शाबाश!` },
 };
 export const speechLanguage = (lang: Lang) => (lang === 'hi' ? 'hi-IN' : 'en-US');

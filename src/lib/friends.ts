@@ -6,7 +6,8 @@ import { FirebaseError, type FirebaseClient } from './firebase';
 
 export type FriendRequest = { from: string; to: string; fromName: string; fromCode: string; toCode: string; createdAt: number };
 export type BoardRow = { uid: string; name: string; weekKm: number; me: boolean; rank: number; updatedAt?: number };
-export type MyStats = { name: string; weekKm: number; weekStart: number };
+export type BoardPeriod = 'week' | 'month' | 'all';
+export type MyStats = { name: string; weekKm: number; weekStart: number; monthKm: number; monthStart: number; totalKm: number };
 /** Small local store for this phone's friend ID and what was last shared. */
 export type KV = { get(): Promise<string | null>; set(value: string): Promise<void> };
 
@@ -30,6 +31,14 @@ export function currentWeekKm(p: { weekKm?: unknown; weekStart?: unknown }, myWe
   const ws = Number(p.weekStart);
   return Number.isFinite(ws) && ws >= myWeekStart - WEEK_GRACE_MS ? Math.max(0, Number(p.weekKm) || 0) : 0;
 }
+/** A friend's km for the current month (same grace), or their all-time total. */
+export function periodKm(p: Record<string, unknown>, period: BoardPeriod, mine: MyStats): number {
+  if (period === 'week') return currentWeekKm(p, mine.weekStart);
+  if (period === 'all') return Math.max(0, Number(p.totalKm) || 0);
+  const ms = Number(p.monthStart);
+  return Number.isFinite(ms) && ms >= mine.monthStart - WEEK_GRACE_MS ? Math.max(0, Number(p.monthKm) || 0) : 0;
+}
+export const myPeriodKm = (s: MyStats, period: BoardPeriod) => (period === 'week' ? s.weekKm : period === 'month' ? s.monthKm : s.totalKm);
 /** Most km first; equal distances share a rank. */
 export function rankBoard(rows: Omit<BoardRow, 'rank'>[]): BoardRow[] {
   const sorted = [...rows].sort((a, b) => b.weekKm - a.weekKm || a.name.localeCompare(b.name));
@@ -92,9 +101,12 @@ export function createFriends(d: { client: FirebaseClient; kv: KV; stats: () => 
           const s = await d.stats();
           const l = await loadLocal();
           const p = l.shared;
-          if (force || !p || p.name !== s.name || p.weekStart !== s.weekStart || Math.abs(p.weekKm - s.weekKm) >= 0.005) {
+          const changed = !p || p.name !== s.name || p.weekStart !== s.weekStart || Math.abs(p.weekKm - s.weekKm) >= 0.005
+            || p.monthStart !== s.monthStart || Math.abs((p.monthKm ?? -1) - s.monthKm) >= 0.005 || Math.abs((p.totalKm ?? -1) - s.totalKm) >= 0.005;
+          if (force || changed) {
             await d.client.set(`profiles/${await me()}`, {
-              code: l.code!, name: s.name.slice(0, 40), weekKm: round2(Math.max(0, s.weekKm)), weekStart: s.weekStart, updatedAt: now(),
+              code: l.code!, name: s.name.slice(0, 40), weekKm: round2(Math.max(0, s.weekKm)), weekStart: s.weekStart,
+              monthKm: round2(Math.max(0, s.monthKm)), monthStart: s.monthStart, totalKm: round2(Math.max(0, s.totalKm)), updatedAt: now(),
             });
             await saveLocal({ shared: { ...s } });
           }
@@ -150,17 +162,17 @@ export function createFriends(d: { client: FirebaseClient; kv: KV; stats: () => 
     return 'sent';
   }
 
-  /** This week's leaderboard: you and every friend. */
-  async function board(): Promise<BoardRow[]> {
+  /** The leaderboard for a period (this week by default): you and every friend. `weekKm` holds that period's km. */
+  async function board(period: BoardPeriod = 'week'): Promise<BoardRow[]> {
     const uid = await me();
     const s = await d.stats();
     const ids = await friendIds();
     const profiles = await Promise.all(ids.map((id) => d.client.get(`profiles/${id}`).catch(() => null)));
     return rankBoard([
-      { uid, name: s.name, weekKm: s.weekKm, me: true },
+      { uid, name: s.name, weekKm: myPeriodKm(s, period), me: true },
       ...ids.map((id, i) => {
         const p = profiles[i];
-        return { uid: id, name: typeof p?.name === 'string' && p.name ? p.name : 'Friend', weekKm: p ? currentWeekKm(p, s.weekStart) : 0,
+        return { uid: id, name: typeof p?.name === 'string' && p.name ? p.name : 'Friend', weekKm: p ? periodKm(p, period, s) : 0,
           me: false, updatedAt: Number(p?.updatedAt) || undefined };
       }),
     ]);

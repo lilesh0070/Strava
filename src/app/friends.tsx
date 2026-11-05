@@ -3,8 +3,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
-import { IconWell, NeuButton, NeuCard, NeuProgress, NeuTile } from '../components/Neu';
-import type { BoardRow, FriendRequest } from '../lib/friends';
+import { IconWell, NeuButton, NeuCard, NeuProgress, NeuSegmented, NeuTile } from '../components/Neu';
+import type { BoardPeriod, BoardRow, FriendRequest } from '../lib/friends';
 import { friends, friendsAvailable } from '../lib/friendsApp';
 import { useT } from '../lib/i18n';
 import { shareApp } from '../lib/shareApp';
@@ -23,6 +23,7 @@ export default function FriendsScreen() {
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [input, setInput] = useState('');
+  const [period, setPeriod] = useState<BoardPeriod>('week');
 
   const load = useCallback(async () => {
     if (!friends) return;
@@ -30,13 +31,13 @@ export default function FriendsScreen() {
       if (!(await friends.isEnabled())) { setSt(EMPTY); return; }
       const code = await friends.myCode(); // stored on the phone: shown even when offline
       setSt((s) => ({ ...(s ?? EMPTY), enabled: true, code }));
-      const [board, incoming, outgoing] = await Promise.all([friends.board(), friends.incoming(), friends.outgoing()]);
+      const [board, incoming, outgoing] = await Promise.all([friends.board(period), friends.incoming(), friends.outgoing()]);
       setSt({ enabled: true, code, board, incoming, outgoing });
       setError(null);
     } catch (e) {
       setError(message(e));
     }
-  }, []);
+  }, [period]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   /** Run an action, then reload; problems are shown as an alert. */
@@ -136,8 +137,10 @@ export default function FriendsScreen() {
       <NeuCard radius={28} style={{ gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <IconWell icon="trophy-outline" />
-          <Text style={F.h2}>{t('fr.thisWeek')}</Text>
+          <Text style={F.h2}>{period === 'week' ? t('fr.thisWeek') : period === 'month' ? t('fr.month') : t('fr.allTime')}</Text>
         </View>
+        <NeuSegmented value={period} onChange={setPeriod}
+          options={[{ key: 'week', label: t('fr.week') }, { key: 'month', label: t('fr.month') }, { key: 'all', label: t('fr.allTime') }]} />
         {st.board.map((r) => (
           <Pressable key={r.uid} accessibilityRole={r.me ? undefined : 'button'} accessibilityHint={r.me ? undefined : t('fr.remove')}
             onLongPress={r.me ? undefined : () => Alert.alert(r.name, t('fr.removeQ'), [

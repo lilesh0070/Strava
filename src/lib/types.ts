@@ -54,6 +54,9 @@ export type Settings = {
   autoCheckUpdates: boolean;
   betaUpdates: boolean; // also offer pre-release (test) builds
   targetPaceSec: number | null; // pace coach target (sec/km); null = off
+  autoLapKm: number | null; // close a lap automatically every N km (voice summary + haptic); null = off
+  targetDistanceM: number | null; // one-time "you're there" cue at this distance; null = off
+  targetTimeSec: number | null; // one-time cue at this moving time; null = off
   reminder: boolean;
   reminderHour: number;
   language: 'en' | 'hi';
@@ -67,6 +70,7 @@ export type Settings = {
 };
 export const DEFAULT_SETTINGS: Settings = {
   voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, betaUpdates: false, targetPaceSec: null,
+  autoLapKm: null, targetDistanceM: null, targetTimeSec: null,
   reminder: false, reminderHour: 18, language: 'en',
   breakReminders: false, breakEveryMin: 60, workStartH: 9, workEndH: 18, workDays: 'mon-fri',
 };
@@ -96,6 +100,8 @@ export type Session = {
   /** Id the saved activity will get, fixed at start so a retried save overwrites instead of duplicating. */
   activityId?: string;
   steps?: number; // counted while recording (not while paused)
+  /** Which one-time target cues have already been spoken. */
+  cued?: { distance?: boolean; time?: boolean };
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {

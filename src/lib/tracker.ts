@@ -220,6 +220,7 @@ export function ingest(locations: Location.LocationObject[]) {
         if (s.kf && s.kf.n > 5) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, s.kf.vs);
         seg.push(q);
         coachPace(s, seg, q.t);
+        checkTargets(s, q.t);
         const km = Math.floor((s.distanceM ?? 0) / 1000);
         if (km > (s.lastCueKm ?? 0)) {
           s.lastCueKm = km;
@@ -281,7 +282,12 @@ function stepWorkout(s: Session, now: number) {
 /** Time-based interval steps also need checking when no new GPS fix arrives (e.g. standing rest). */
 export function workoutTick() {
   return locked(async () => {
-    if (session && stepWorkout(session, Date.now())) { await persist(); notify(); }
+    if (!session) return;
+    const now = Date.now();
+    const cuedBefore = JSON.stringify(session.cued ?? {});
+    if (session.status === 'recording') checkTargets(session, now); // the time target needs no GPS fix
+    const changed = stepWorkout(session, now) || JSON.stringify(session.cued ?? {}) !== cuedBefore;
+    if (changed) { await persist(); notify(); }
   });
 }
 
@@ -299,24 +305,57 @@ export function currentSpeed(): number | null {
   return rollingSpeed(seg, 30);
 }
 
+/** Close the current lap (at the given moving time / distance). Returns false for a double tap. */
+function closeLap(s: Session, sec: number, dist: number): boolean {
+  const marks = s.laps ?? [];
+  const prev = marks[marks.length - 1] ?? { distanceM: 0, movingSec: 0 };
+  if (sec - prev.movingSec < 3) return false; // ignore double taps
+  s.laps = [...marks, { distanceM: dist, movingSec: sec }];
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+  if (settings.voiceCues) {
+    const d = dist - prev.distanceM, t = sec - prev.movingSec;
+    say(phrase().lap(s.laps.length, (d / 1000).toFixed(2), t));
+  }
+  return true;
+}
+
 /** Close the current lap. */
 export function lap() {
   return locked(async () => {
     if (!session) return;
-    const marks = session.laps ?? [];
-    const dist = session.distanceM ?? 0;
-    const sec = sessionMovingSec(session);
-    const prev = marks[marks.length - 1] ?? { distanceM: 0, movingSec: 0 };
-    if (sec - prev.movingSec < 3) return; // ignore double taps
-    session.laps = [...marks, { distanceM: dist, movingSec: sec }];
+    if (!closeLap(session, sessionMovingSec(session), session.distanceM ?? 0)) return;
     await persist();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    if (settings.voiceCues) {
-      const d = dist - prev.distanceM, t = sec - prev.movingSec;
-      say(phrase().lap(session.laps.length, (d / 1000).toFixed(2), t));
-    }
     notify();
   });
+}
+
+/** Auto-lap every N km, and the one-time distance / time target cues. Called for every kept fix and clock tick. */
+function checkTargets(s: Session, now: number) {
+  const dist = s.distanceM ?? 0, sec = sessionMovingSec(s, now);
+  const lapM = settings.autoLapKm ? settings.autoLapKm * 1000 : 0;
+  if (lapM > 0) {
+    const marks = s.laps ?? [];
+    const lastAt = marks.length ? marks[marks.length - 1].distanceM : 0;
+    // laps close at the marks themselves (2 km, 4 km…), not at the distance a fix happens to land on
+    if (dist - lastAt >= lapM) {
+      const at = lastAt + lapM;
+      const prevSec = marks.length ? marks[marks.length - 1].movingSec : 0;
+      // moving time at the mark: scale the latest interval (good enough within a fix or two)
+      const since = dist - lastAt, lapSec = since > 0 ? prevSec + (sec - prevSec) * (lapM / since) : sec;
+      closeLap(s, lapSec, at);
+    }
+  }
+  s.cued ??= {};
+  if (settings.targetDistanceM && !s.cued.distance && dist >= settings.targetDistanceM) {
+    s.cued.distance = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    if (settings.voiceCues) say(phrase().targetDistance((settings.targetDistanceM / 1000).toFixed(settings.targetDistanceM % 1000 ? 1 : 0)));
+  }
+  if (settings.targetTimeSec && !s.cued.time && sec >= settings.targetTimeSec) {
+    s.cued.time = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    if (settings.voiceCues) say(phrase().targetTime(Math.round(settings.targetTimeSec / 60)));
+  }
 }
 
 // Must be defined at module scope so it is registered when the JS runtime boots in the background.

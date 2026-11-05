@@ -1,10 +1,10 @@
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Alert, Animated, AppState, LayoutAnimation, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
+import { NeuButton, NeuCard, NeuIconButton, NeuProgress } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
@@ -13,7 +13,9 @@ import { fmtSteps, isOnFoot } from '../../lib/steps';
 import { gpsHealth } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
 import { newRecords } from '../../lib/records';
-import { getSettings, listActivities, updateSettings } from '../../lib/storage';
+import { getProfile, getSettings, listActivities, updateSettings } from '../../lib/storage';
+import { useActivities } from '../../lib/useActivities';
+import { mondayOf } from '../../lib/coach';
 import { showToast } from '../../lib/toast';
 import { useSelectedWorkout } from '../../lib/workoutSelection';
 import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
@@ -80,6 +82,18 @@ export default function Record() {
   const [now, setNow] = useState(Date.now);
   /** What the screen is busy with: the buttons show it instead of looking frozen. */
   const [phase, setPhase] = useState<'idle' | 'preparing' | 'saving'>('idle');
+  // targets for this activity and the weekly goal, for the progress bars under the live stats
+  const [targets, setTargets] = useState<{ distM: number | null; timeSec: number | null }>({ distM: null, timeSec: null });
+  const [weeklyGoalKm, setWeeklyGoalKm] = useState(0);
+  const { items, loadedAt } = useActivities();
+  useEffect(() => {
+    getSettings().then((s) => setTargets({ distM: s.targetDistanceM, timeSec: s.targetTimeSec })).catch(() => undefined);
+    getProfile().then((p) => setWeeklyGoalKm(p.weeklyGoalKm)).catch(() => undefined);
+  }, [session?.startedAt]);
+  const weekKmBefore = useMemo(() => {
+    const ws = mondayOf(loadedAt);
+    return (items ?? []).filter((a) => a.startedAt >= ws).reduce((s, a) => s + a.distanceM, 0) / 1000;
+  }, [items, loadedAt]);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
   const [precision, setPrecision] = useState<tracker.Precision>('precise');
   const [focused, setFocused] = useState(true);
@@ -325,6 +339,35 @@ export default function Record() {
               <Stat label={`${t('rec.lap')} ${laps.length + 1}`} value={fmtDuration(openLap.durationSec)} />
               <Stat label={t('rec.lapDist')} value={fmtKm(openLap.distanceM)} unit="km" />
             </View>
+            {(targets.distM || targets.timeSec || weeklyGoalKm > 0) && (
+              <View style={{ gap: 8 }}>
+                {targets.distM ? (
+                  <View style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={F.label}>{t('rec.targetBar')} · {fmtKm(targets.distM)} km</Text>
+                      <Text style={[F.label, { color: dist >= targets.distM ? C.successInk : C.muted }]}>{Math.min(100, Math.round((dist / targets.distM) * 100))}%</Text>
+                    </View>
+                    <NeuProgress value={dist / targets.distM} />
+                  </View>
+                ) : targets.timeSec ? (
+                  <View style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={F.label}>{t('rec.targetBar')} · {fmtDuration(targets.timeSec)}</Text>
+                      <Text style={[F.label, { color: moving >= targets.timeSec ? C.successInk : C.muted }]}>{Math.min(100, Math.round((moving / targets.timeSec) * 100))}%</Text>
+                    </View>
+                    <NeuProgress value={moving / targets.timeSec} />
+                  </View>
+                ) : null}
+                {weeklyGoalKm > 0 && (
+                  <View style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={F.label}>{t('rec.weekBar')} · {(weekKmBefore + dist / 1000).toFixed(1)} / {weeklyGoalKm} km</Text>
+                    </View>
+                    <NeuProgress value={(weekKmBefore + dist / 1000) / weeklyGoalKm} />
+                  </View>
+                )}
+              </View>
+            )}
             {isOnFoot(active.sport) && active.steps != null && (
               <View style={{ flexDirection: 'row' }}>
                 <Stat label={t('rec.steps')} value={fmtSteps(active.steps)} />
