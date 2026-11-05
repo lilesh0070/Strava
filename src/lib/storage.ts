@@ -1,21 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { bestEffort, simplify } from './geo';
+import { readBlob, removeBlob, writeBlob } from './blobStore';
 import { DEFAULT_SETTINGS, type Activity, type Gear, type GearKind, type Settings } from './types';
 
 const INDEX = 'stride:activities';
-const item = (id: string) => `stride:activity:${id}`;
+const item = (id: string) => `stride:activity:${id}`; // pre-1.3.2 location, kept only for migration
+const blobKey = (id: string) => `activity-${id}`;
 const PROFILE = 'stride:profile';
 // Lists (feed, profile, badges) only need a light copy of each activity: a simplified route for
 // the thumbnail and pre-computed best efforts. Reading thousands of raw GPS points for every
 // card made the feed slow; full points are now loaded only on the detail screen.
-// Each summary has its own key: Android can't read back a single value over 2 MB (its SQLite
-// CursorWindow limit), which one combined blob reached after a few hundred activities.
-const summaryKey = (id: string) => `stride:summary:${id}`;
-const LEGACY_SUMMARIES = 'stride:summaries'; // one blob for all summaries (v1.2), migrated on first read
+const SUMMARIES = 'stride:summaries'; // pre-1.3.2 location
+const SUMMARIES_BLOB = 'summaries';
+const MIGRATED = 'stride:files-v1';
 export const EFFORT_DISTANCES = [1000, 5000, 10000, 21097.5];
 
-export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number };
-export const DEFAULT_PROFILE: Profile = { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80 };
+export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number; team: string };
+export const DEFAULT_PROFILE: Profile = { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80, team: '' };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -28,8 +29,8 @@ export function onActivitiesChanged(fn: Listener) {
 const emit = () => listeners.forEach((l) => l());
 export const notifyDataChanged = emit;
 
-// Every write that reads first (index, summaries, gear) goes through one queue, so overlapping saves
-// (e.g. a Restore still running while a recording is saved) can never drop each other's changes.
+// Every write that reads first (index, summaries, gear, profile, settings) goes through one queue, so
+// overlapping saves (e.g. a restore still running while a recording is saved) never drop each other.
 let queue: Promise<unknown> = Promise.resolve();
 function serial<T>(fn: () => Promise<T>): Promise<T> {
   const run = queue.then(fn, fn);
@@ -40,6 +41,44 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
 async function readIndex(): Promise<string[]> {
   const raw = await AsyncStorage.getItem(INDEX);
   return raw ? JSON.parse(raw) : [];
+}
+
+// ---------- one-time move of activities from AsyncStorage into files ----------
+// Each activity is copied, read back and compared before the old copy is removed, so nothing can
+// be lost half-way. If anything fails it simply tries again on the next launch.
+let migration: Promise<void> | null = null;
+function migrate(): Promise<void> {
+  if (!migration) {
+    migration = (async () => {
+      if (await AsyncStorage.getItem(MIGRATED)) return;
+      let complete = true;
+      for (const id of await readIndex()) {
+        try {
+          const old = await AsyncStorage.getItem(item(id));
+          if (old == null) continue;
+          await writeBlob(blobKey(id), old);
+          if ((await readBlob(blobKey(id))) === old) await AsyncStorage.removeItem(item(id));
+          else complete = false;
+        } catch { complete = false; }
+      }
+      try {
+        const sums = await AsyncStorage.getItem(SUMMARIES);
+        if (sums != null) {
+          await writeBlob(SUMMARIES_BLOB, sums);
+          if ((await readBlob(SUMMARIES_BLOB)) === sums) await AsyncStorage.removeItem(SUMMARIES);
+          else complete = false;
+        }
+      } catch { complete = false; }
+      if (complete) await AsyncStorage.setItem(MIGRATED, '1');
+    })().catch(() => { migration = null; });
+  }
+  return migration;
+}
+
+/** The full activity JSON, wherever it currently lives. */
+async function readActivityRaw(id: string): Promise<string | null> {
+  await migrate();
+  return (await readBlob(blobKey(id))) ?? (await AsyncStorage.getItem(item(id)).catch(() => null));
 }
 
 export function toSummary(a: Activity): Activity {
@@ -53,72 +92,42 @@ export function toSummary(a: Activity): Activity {
   return { ...a, lite: true, efforts, segments: a.segments.map((g) => simplify(g, 8)) };
 }
 
-const CHUNK = 20;
-async function multiSetChunked(pairs: [string, string][]) {
-  for (let i = 0; i < pairs.length; i += CHUNK) await AsyncStorage.multiSet(pairs.slice(i, i + CHUNK));
-}
-/**
- * Read many keys, a few at a time. If a chunk fails (e.g. one value is too big to read on Android),
- * its keys are read one by one and only the unreadable ones are skipped, so one bad row can't hide all.
- */
-async function readMany<T>(keys: string[], unreadable?: string[]): Promise<Map<string, T>> {
-  const out = new Map<string, T>();
-  const take = (k: string, v: string | null) => {
-    if (!v) return;
-    try { out.set(k, JSON.parse(v) as T); } catch { unreadable?.push(k); } // corrupt row
-  };
-  for (let i = 0; i < keys.length; i += CHUNK) {
-    const part = keys.slice(i, i + CHUNK);
-    try {
-      for (const [k, v] of await AsyncStorage.multiGet(part)) take(k, v);
-    } catch {
-      for (const k of part) { try { take(k, await AsyncStorage.getItem(k)); } catch { unreadable?.push(k); } }
-    }
-  }
-  return out;
-}
-
 let summaryCache: Record<string, Activity> | null = null;
-/** One-time move of the old combined summaries blob to per-activity keys (every caller waits for it). */
-let migration: Promise<void> | null = null;
-const migrateLegacySummaries = () => (migration ??= (async () => {
-  try {
-    const raw = await AsyncStorage.getItem(LEGACY_SUMMARIES);
-    if (raw) {
-      const old = JSON.parse(raw) as Record<string, Activity>;
-      await multiSetChunked(Object.values(old).map((a) => [summaryKey(a.id), JSON.stringify(a)]));
-    }
-  } catch { /* unreadable: the summaries are rebuilt from the activities instead */ }
-  await AsyncStorage.removeItem(LEGACY_SUMMARIES).catch(() => undefined);
-})());
+async function readSummaries(): Promise<Record<string, Activity>> {
+  if (summaryCache) return summaryCache;
+  await migrate();
+  const raw = (await readBlob(SUMMARIES_BLOB)) ?? (await AsyncStorage.getItem(SUMMARIES).catch(() => null));
+  summaryCache = raw ? JSON.parse(raw) : {};
+  return summaryCache!;
+}
+async function writeSummaries(map: Record<string, Activity>) {
+  summaryCache = map;
+  await writeBlob(SUMMARIES_BLOB, JSON.stringify(map));
+}
 
-/** Summaries for these ids that exist in storage (cached in memory after the first read). */
-async function readSummaries(ids: string[]): Promise<Record<string, Activity>> {
-  await migrateLegacySummaries();
-  const map = (summaryCache ??= {});
-  const missing = ids.filter((id) => !map[id]);
-  // ??= : a save that finished during this read already put the newer summary in the cache
-  if (missing.length) for (const s of (await readMany<Activity>(missing.map(summaryKey))).values()) map[s.id] ??= s;
-  return map;
+/** The full activity, or null if it is missing or can't be read (a corrupt file must not break lists). */
+async function readActivitySafe(id: string): Promise<Activity | null> {
+  try {
+    const v = await readActivityRaw(id);
+    return v ? (JSON.parse(v) as Activity) : null;
+  } catch { return null; }
 }
 
 /** Light copies for lists, newest first. Builds missing summaries once (migration from older versions). */
 export async function listActivities(): Promise<Activity[]> {
   const ids = await readIndex();
   if (!ids.length) return [];
-  const map = await readSummaries(ids);
+  let map = await readSummaries();
   if (ids.some((id) => !map[id])) {
-    // build missing summaries from the full activities, queued with the writes so a save that happens
-    // meanwhile can't be overwritten by a summary of the older copy
-    await serial(async () => {
-      const missing = ids.filter((id) => !map[id]);
-      const built: [string, string][] = [];
-      for (const a of (await readMany<Activity>(missing.map(item))).values()) {
-        const s = toSummary(a);
-        map[a.id] = s;
-        built.push([summaryKey(a.id), JSON.stringify(s)]);
-      }
-      await multiSetChunked(built);
+    // queued with the writes, so a save that happens meanwhile can't be replaced by an older summary
+    map = await serial(async () => {
+      const cur = await readSummaries();
+      const missing = ids.filter((id) => !cur[id]);
+      if (!missing.length) return cur;
+      const next = { ...cur };
+      for (const a of await Promise.all(missing.map(readActivitySafe))) if (a) next[a.id] = toSummary(a);
+      await writeSummaries(next);
+      return next;
     });
   }
   return ids.map((id) => map[id]).filter((a): a is Activity => !!a).sort((a, b) => b.startedAt - a.startedAt);
@@ -130,38 +139,45 @@ export async function listActivities(): Promise<Activity[]> {
  */
 export async function listFullActivities(): Promise<{ activities: Activity[]; unreadable: string[] }> {
   const ids = await readIndex();
-  if (!ids.length) return { activities: [], unreadable: [] };
-  const bad: string[] = [];
-  const activities = [...(await readMany<Activity>(ids.map(item), bad)).values()];
-  return { activities, unreadable: bad.map((k) => k.slice(item('').length)) };
+  const rows = await Promise.all(ids.map(async (id) => {
+    try {
+      const v = await readActivityRaw(id);
+      return { id, a: v ? (JSON.parse(v) as Activity) : null, ok: true };
+    } catch { return { id, a: null, ok: false }; }
+  }));
+  return {
+    activities: rows.map((r) => r.a).filter((a): a is Activity => !!a),
+    unreadable: rows.filter((r) => !r.ok).map((r) => r.id),
+  };
 }
 
 export async function getActivity(id: string): Promise<Activity | null> {
-  const raw = await AsyncStorage.getItem(item(id));
+  const raw = await readActivityRaw(id);
   return raw ? JSON.parse(raw) : null;
 }
 
+/** Saves the activity file first, then lists it: an interruption can never list a missing activity. */
 export function saveActivity(a: Activity, opts: { silent?: boolean } = {}): Promise<void> {
   if (a.lite) return Promise.reject(new Error('Refusing to save a list summary over the full activity'));
   return serial(async () => {
+    await migrate();
+    await writeBlob(blobKey(a.id), JSON.stringify(a));
     const ids = await readIndex();
-    if (!ids.includes(a.id)) ids.push(a.id);
-    const summary = toSummary(a);
-    await migrateLegacySummaries(); // the old combined blob must not be copied over this later
-    // one atomic write: the activity, its summary and the index always agree
-    await AsyncStorage.multiSet([[item(a.id), JSON.stringify(a)], [summaryKey(a.id), JSON.stringify(summary)], [INDEX, JSON.stringify(ids)]]);
-    (summaryCache ??= {})[a.id] = summary;
+    if (!ids.includes(a.id)) { ids.push(a.id); await AsyncStorage.setItem(INDEX, JSON.stringify(ids)); }
+    const map = await readSummaries();
+    await writeSummaries({ ...map, [a.id]: toSummary(a) });
     if (!opts.silent) emit();
   });
 }
 
 /**
  * Add many activities at once (backup restore). Activities whose id already exists here are left
- * alone, so a restore never overwrites newer local edits. The index and summaries are written once,
- * not once per activity. Returns how many were added.
+ * alone, so a restore never overwrites newer local edits. The index and the summaries are written
+ * once at the end, not once per activity. Returns how many were added.
  */
 export function importActivities(list: Activity[]): Promise<number> {
   return serial(async () => {
+    await migrate();
     const ids = await readIndex();
     const have = new Set(ids);
     const fresh: Activity[] = [];
@@ -171,20 +187,11 @@ export function importActivities(list: Activity[]): Promise<number> {
       fresh.push({ ...a, lite: undefined, efforts: undefined });
     }
     if (!fresh.length) return 0;
-    await migrateLegacySummaries();
-    const map = (summaryCache ??= {});
-    // a few activities per write keeps each native call (and its memory spike) small
-    for (let i = 0; i < fresh.length; i += 10) {
-      const pairs: [string, string][] = [];
-      for (const a of fresh.slice(i, i + 10)) {
-        const s = toSummary(a);
-        map[a.id] = s;
-        pairs.push([item(a.id), JSON.stringify(a)], [summaryKey(a.id), JSON.stringify(s)]);
-      }
-      await AsyncStorage.multiSet(pairs);
-    }
-    for (const a of fresh) ids.push(a.id);
-    await AsyncStorage.setItem(INDEX, JSON.stringify(ids)); // the index last: a cut-short import leaves no dangling ids
+    for (const a of fresh) await writeBlob(blobKey(a.id), JSON.stringify(a)); // files first, then list them
+    await AsyncStorage.setItem(INDEX, JSON.stringify([...ids, ...fresh.map((a) => a.id)]));
+    const map = { ...(await readSummaries()) };
+    for (const a of fresh) map[a.id] = toSummary(a);
+    await writeSummaries(map);
     emit();
     return fresh.length;
   });
@@ -194,9 +201,12 @@ export function deleteActivity(id: string): Promise<Activity | null> {
   return serial(async () => {
     const full = await getActivity(id).catch(() => null); // an unreadable activity can still be deleted
     const ids = (await readIndex()).filter((x) => x !== id);
+    const map = { ...(await readSummaries()) };
+    delete map[id];
     await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
-    await AsyncStorage.multiRemove([item(id), summaryKey(id)]);
-    if (summaryCache) delete summaryCache[id];
+    await removeBlob(blobKey(id));
+    await AsyncStorage.removeItem(item(id)).catch(() => undefined);
+    await writeSummaries(map);
     emit();
     return full; // lets the caller offer "Undo"
   });
@@ -263,4 +273,3 @@ export function updateProfile(patch: Partial<Profile>): Promise<Profile> {
     return next;
   });
 }
-

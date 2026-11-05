@@ -13,7 +13,7 @@ const ONBOARDED_KEY = 'stride:onboarded';
 
 const PAGES = [
   { icon: 'map-marker-path', t: 'ob.1t', b: 'ob.1b' },
-  { icon: 'account-voice', t: 'ob.2t', b: 'ob.2b' },
+  { icon: 'heart-pulse', t: 'ob.2t', b: 'ob.2b' },
   { icon: 'shield-lock-outline', t: 'ob.3t', b: 'ob.3b' },
   { icon: 'hand-wave-outline', t: 'ob.4t', b: 'ob.4b' },
 ] as const;

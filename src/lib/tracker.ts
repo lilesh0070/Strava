@@ -1,18 +1,25 @@
 // GPS recording engine. Uses a background location task when "Always" permission is granted
 // (keeps recording with the screen off via an Android foreground service), and falls back to a
 // foreground watcher otherwise. Session state is persisted so a killed app can resume.
+//
+// Precision: full GNSS every second with no distance filter (so the live position and the ±m chip
+// never go stale), a constant-velocity Kalman filter fed with GPS Doppler speed + course, outlier
+// rejection, a stale-fix guard and a stationary gate. A watchdog restarts GPS if fixes stop arriving.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Pedometer } from 'expo-sensors';
 import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
-import { expectedSpeed, kalmanStep, lapsFromMarks, paceAdvice, rollingSpeed } from './live';
+import { STOPPED_MS, kalmanStep, lapsFromMarks, paceAdvice, processNoise, rollingSpeed, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
+import { readBlob, removeBlob, writeBlob } from './blobStore';
+import { isOnFoot, stepDelta } from './steps';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
   DEFAULT_SETTINGS, defaultName, gearKindFor, newActivityId, sessionMovingSec, sportInfo, workoutSec,
@@ -26,6 +33,12 @@ let session: Session | null = null;
 let loaded = false;
 let watcher: Location.LocationSubscription | null = null;
 let lastFix: Point | null = null;
+/** Wall-clock time the last fix arrived (fix timestamps come from the GPS clock and may be skewed). */
+let lastFixAt = 0;
+/** How old the last fix already was when it arrived (a cached "last location" can be minutes old). */
+let lastFixAge = Infinity;
+/** Pre-start smoothing, handed to the session on Start so the filter is already settled. */
+let warmKf: KalmanState | null = null;
 let settings: Settings = { ...DEFAULT_SETTINGS };
 /** Speak in the app language (Hindi voice when Hindi is selected). */
 const say = (text: string, lang = settings.language) => Speech.speak(text, { language: speechLanguage(lang) });
@@ -51,6 +64,7 @@ AppState.addEventListener('change', (st) => {
   appActive = st === 'active';
   if (appActive) notify();
   else locked(persist).catch(() => undefined); // make sure nothing is lost if the OS kills us (queued, so it can't revive a finished session)
+  syncWarm(); // pre-start GPS only runs while the app is on screen
 });
 function notify() { if (appActive) listeners.forEach((l) => l()); }
 
@@ -62,36 +76,19 @@ export function subscribe(fn: () => void) {
 }
 export const getSession = () => session;
 export const getLastFix = () => lastFix;
+export const getLastFixAt = () => lastFixAt;
 
-// The session's points are stored in chunks, not inside one value: Android can't read back a value
-// over 2 MB (about 8 hours of 1 Hz GPS). Points are only ever appended, so a save rewrites just the
-// session info and the last chunk instead of the whole track.
-const chunkKey = (i: number) => `${SESSION_KEY}:pts:${i}`;
-const POINTS_PER_CHUNK = 4000; // ~300 KB
-let persistedPoints = 0; // points already safely in full chunks + the last chunk
-let storedChunks = 0;
+// The live recording is kept in a file (a long ride's GPS points outgrow AsyncStorage's per-value
+// limit on Android); older versions kept it in AsyncStorage, which is still read once after an update.
+const SESSION_BLOB = 'session';
 let keepUnreadable = false; // a stored session we couldn't read: leave it until a new one replaces it
-
 async function load() {
   if (loaded) return;
+  const raw = (await readBlob(SESSION_BLOB).catch(() => null)) ?? (await AsyncStorage.getItem(SESSION_KEY).catch(() => null));
   try {
-    const raw = await AsyncStorage.getItem(SESSION_KEY);
-    const stored = raw ? JSON.parse(raw) : null;
-    if (stored && Array.isArray(stored.segLens)) {
-      const { segLens, chunks, ...rest } = stored as Omit<Session, 'segments'> & { segLens: number[]; chunks: number };
-      const rows = await AsyncStorage.multiGet(Array.from({ length: chunks }, (_, i) => chunkKey(i)));
-      const flat: Point[] = rows.flatMap(([, v]) => (v ? (JSON.parse(v) as Point[]) : []));
-      let o = 0;
-      const segments = segLens.map((n) => { const seg = flat.slice(o, o + n); o += n; return seg; });
-      session = { ...rest, segments };
-      persistedPoints = flat.length;
-      storedChunks = chunks;
-    } else {
-      session = stored; // saved by v1.2: points inline
-    }
+    session = raw ? JSON.parse(raw) : null;
   } catch {
-    // unreadable (corrupt, or a huge v1.2 session over the read limit): don't fail every later
-    // start/ingest, and don't delete it either
+    // corrupt: don't fail every later start/ingest, and don't delete it either
     session = null;
     keepUnreadable = true;
   }
@@ -99,23 +96,8 @@ async function load() {
 }
 async function persist() {
   lastPersistAt = Date.now();
-  if (session) {
-    const { segments, ...info } = session;
-    const flat = segments.flat();
-    const n = Math.ceil(flat.length / POINTS_PER_CHUNK);
-    const firstDirty = Math.floor(Math.min(persistedPoints, flat.length) / POINTS_PER_CHUNK);
-    const pairs: [string, string][] = [[SESSION_KEY, JSON.stringify({ ...info, segLens: segments.map((g) => g.length), chunks: n })]];
-    for (let i = firstDirty; i < n; i++) pairs.push([chunkKey(i), JSON.stringify(flat.slice(i * POINTS_PER_CHUNK, (i + 1) * POINTS_PER_CHUNK))]);
-    await AsyncStorage.multiSet(pairs); // info and chunks together, so they always agree
-    if (storedChunks > n) await AsyncStorage.multiRemove(Array.from({ length: storedChunks - n }, (_, i) => chunkKey(n + i)));
-    persistedPoints = flat.length;
-    storedChunks = n;
-    keepUnreadable = false;
-  } else if (!keepUnreadable) {
-    await AsyncStorage.multiRemove([SESSION_KEY, ...Array.from({ length: storedChunks }, (_, i) => chunkKey(i))]);
-    persistedPoints = 0;
-    storedChunks = 0;
-  }
+  if (session) { await writeBlob(SESSION_BLOB, JSON.stringify(session)); keepUnreadable = false; }
+  else if (!keepUnreadable) { await removeBlob(SESSION_BLOB); await AsyncStorage.removeItem(SESSION_KEY).catch(() => undefined); }
 }
 /** Writing the whole session every second is the biggest CPU/battery cost after GPS; throttle it. */
 async function persistSoon() {
@@ -123,91 +105,122 @@ async function persistSoon() {
 }
 
 const r = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
-function toPoint(l: Location.LocationObject): Point {
-  // ~10 cm precision is plenty and keeps stored activities small
+const DAY_MS = 86_400_000;
+function toFix(l: Location.LocationObject): GpsFix {
+  const c = l.coords;
+  // A few Android chips report GPS-week-rollover timestamps years off; fall back to the phone clock.
+  const t = Math.abs(l.timestamp - Date.now()) > DAY_MS ? Date.now() : l.timestamp;
   return {
-    lat: r(l.coords.latitude, 6),
-    lng: r(l.coords.longitude, 6),
-    alt: l.coords.altitude == null ? null : r(l.coords.altitude, 1),
-    acc: l.coords.accuracy == null ? null : Math.round(l.coords.accuracy),
-    t: l.timestamp,
+    lat: c.latitude, lng: c.longitude,
+    alt: c.altitude == null ? null : r(c.altitude, 1),
+    acc: c.accuracy == null ? null : r(c.accuracy, 1),
+    t, spd: c.speed, hdg: c.heading,
   };
 }
+/** What gets stored: ~10 cm precision is plenty and keeps activities small. */
+const toPoint = (f: Pick<Point, 'lat' | 'lng' | 'alt' | 'acc' | 't'>): Point => ({
+  lat: r(f.lat, 6), lng: r(f.lng, 6), alt: f.alt, acc: f.acc == null ? null : Math.round(f.acc), t: f.t,
+});
+
+// ---------- stale-fix guard ----------
+// Android hands over its cached "last location" when updates (re)start or when a broadcast has no
+// fresh result. Such a fix can be minutes old and far away, and as the first point of a segment it
+// would add a phantom jump. Lag = arrival time − fix time; the smallest recent lag is the clock skew
+// between the GPS and phone clocks, so a skewed clock never makes every fix look stale.
+const lags: number[] = [];
+function staleness(f: GpsFix): number {
+  lags.push(Date.now() - f.t);
+  if (lags.length > 30) lags.shift();
+  return Date.now() - f.t - Math.min(...lags);
+}
+const STALE_MS = 30_000; // cached fixes are minutes old; background batches are at most ~15 s old
+const accOk = (f: { acc: number | null }, max: number) => f.acc != null && f.acc <= max;
 
 export function ingest(locations: Location.LocationObject[]) {
   return locked(async () => {
     await load();
     const statusBefore = session?.status;
-    for (const l of locations) {
-      const p = toPoint(l);
+    const fixes = locations.map(toFix).sort((a, b) => a.t - b.t);
+    for (const f of fixes) {
+      lastFixAt = Date.now();
+      const age = staleness(f);
+      lastFixAge = age;
+      if (lastFix && f.t <= lastFix.t) continue; // duplicate or out-of-order delivery
+      const p = toPoint(f);
       lastFix = p;
       if (!session) continue;
-      ingestFix(session, p);
-      // time-based interval steps are checked on every fix, kept or not (standing rests, screen off)
-      stepWorkout(session, p.t);
+      const s = session;
+      const seg = s.segments[s.segments.length - 1];
+      const last = seg[seg.length - 1] ?? s.segments.flat().at(-1);
+
+      if (s.status === 'paused') {
+        // auto-resume once the athlete clearly moves away from where they stopped
+        if (s.autoPaused && last && age <= STALE_MS && accOk(p, 25) && haversine(last, p) >= AUTO_RESUME_DIST_M) {
+          const pausedFor = Math.max(0, p.t - (s.pauseStartedAt ?? p.t));
+          s.pausedMs += pausedFor;
+          s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
+          s.pauseStartedAt = null;
+          s.status = 'recording';
+          s.autoPaused = false;
+          s.segments.push([p]);
+          s.segStartedAt = p.t;
+          s.kf = null;
+          if (settings.voiceCues) say(phrase().resumed);
+        }
+        stepWorkout(s, p.t); // a standing (auto-paused) rest still counts down
+        continue;
+      }
+
+      // a cached fix from before this segment must not become its first point
+      if (!seg.length && age > STALE_MS) continue;
+
+      // smooth good-quality fixes before deciding whether to keep them
+      let q = p;
+      let ok = true;
+      if (accOk(f, 35)) {
+        const kf = kalmanStep(s.kf, f, processNoise(s.sport));
+        s.kf = kf;
+        if (kf.outlier) ok = false; // multipath jump: ignore it
+        else {
+          q = toPoint({ ...f, lat: kf.lat, lng: kf.lng });
+          lastFix = q; // the live dot follows the smoothed track, the chip keeps the raw accuracy
+          // standing still (Doppler says so): don't let leftover jitter creep into the distance
+          if (seg.length && Math.hypot(kf.ve, kf.vn) < STOPPED_MS) ok = false;
+        }
+      }
+      if (ok && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12)) {
+        const prev = seg[seg.length - 1];
+        if (prev) s.distanceM = (s.distanceM ?? 0) + haversine(prev, q);
+        // filtered Doppler speed: no spikes from a single noisy fix
+        if (s.kf && s.kf.n > 5) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, s.kf.vs);
+        seg.push(q);
+        coachPace(s, seg, q.t);
+        const km = Math.floor((s.distanceM ?? 0) / 1000);
+        if (km > (s.lastCueKm ?? 0)) {
+          s.lastCueKm = km;
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+          if (settings.voiceCues) {
+            const args = [km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace] as const;
+            say(settings.language === 'hi' ? kmCueHi(...args) : kmCue(...args));
+          }
+        }
+      } else {
+        // Idle since the last kept point, or since this segment began. Never measured from a point
+        // before the last resume, or a manual pause would be subtracted a second time.
+        const kept = seg[seg.length - 1];
+        const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : p.t);
+        if (settings.autoPause && shouldAutoPause(idleSince, p.t) && (s.distanceM ?? 0) > 0) {
+          s.status = 'paused';
+          s.autoPaused = true;
+          s.pauseStartedAt = idleSince;
+          if (settings.voiceCues) say(phrase().paused);
+        }
+      }
+      stepWorkout(s, p.t); // time-based interval steps: checked on every fix, kept or not
     }
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
     notify();
   });
-}
-
-function ingestFix(s: Session, p: Point) {
-  const seg = s.segments[s.segments.length - 1];
-  const prev = seg[seg.length - 1];
-
-  if (s.status === 'paused') {
-    // auto-resume once the athlete clearly moves away from where they stopped
-    const last = prev ?? s.segments.flat().at(-1);
-    if (s.autoPaused && last && (p.acc ?? 99) <= 35 && haversine(last, p) >= AUTO_RESUME_DIST_M) {
-      const pausedFor = Math.max(0, p.t - (s.pauseStartedAt ?? p.t));
-      s.pausedMs += pausedFor;
-      s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
-      s.pauseStartedAt = null;
-      s.status = 'recording';
-      s.autoPaused = false;
-      s.segments.push([p]);
-      s.segStartedAt = p.t;
-      s.kf = null;
-      if (settings.voiceCues) say(phrase().resumed);
-    }
-    return;
-  }
-
-  // smooth good-quality fixes before deciding whether to keep them
-  let q = p;
-  if ((p.acc ?? 99) <= 35) {
-    s.kf = kalmanStep(s.kf, p, expectedSpeed(s.sport));
-    q = { ...p, lat: r(s.kf.lat, 6), lng: r(s.kf.lng, 6) }; // same ~10 cm precision as raw fixes
-  }
-  if (acceptPoint(prev, q, s.sport === 'ride' ? 45 : 12)) {
-    if (prev) {
-      const d = haversine(prev, q);
-      s.distanceM = (s.distanceM ?? 0) + d;
-      const v = d / Math.max(1, (q.t - prev.t) / 1000);
-      if (seg.length > 3) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, v);
-    }
-    seg.push(q);
-    coachPace(s, seg, q.t);
-    const km = Math.floor((s.distanceM ?? 0) / 1000);
-    if (km > (s.lastCueKm ?? 0)) {
-      s.lastCueKm = km;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-      if (settings.voiceCues) {
-        const args = [km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace] as const;
-        say(settings.language === 'hi' ? kmCueHi(...args) : kmCue(...args));
-      }
-    }
-    return;
-  }
-  // Idle since the last kept point, or since this segment began. Never measured from a point before the
-  // last resume, or a manual pause would be counted twice.
-  const idleSince = prev?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : p.t);
-  if (settings.autoPause && shouldAutoPause(idleSince, p.t) && (s.distanceM ?? 0) > 0) {
-    s.status = 'paused';
-    s.autoPaused = true;
-    s.pauseStartedAt = idleSince;
-    if (settings.voiceCues) say(phrase().paused);
-  }
 }
 
 function coachPace(s: Session, seg: Point[], now: number) {
@@ -240,14 +253,12 @@ export function workoutTick() {
   });
 }
 
-/** Current pace/speed from the last 30 s of movement (m/s); 0 once no movement has been kept for a while. */
-export function currentSpeed(now = Date.now()): number | null {
+/** Live speed (m/s): the filtered GPS Doppler speed, or the last 30 s of track when that is unavailable. */
+export function currentSpeed(): number | null {
   if (!session || session.status !== 'recording') return null;
-  const seg = session.segments[session.segments.length - 1];
-  const last = seg[seg.length - 1];
-  // fixes less than 3 m apart are dropped, so a long gap since the last kept one means standing still
-  if (!last || now - last.t > 15_000) return 0;
-  return rollingSpeed(seg, 30);
+  const kf = session.kf;
+  if (kf && typeof kf.vs === 'number' && kf.n > 2 && Date.now() - lastFixAt < 5_000) return kf.vs < STOPPED_MS ? null : kf.vs;
+  return rollingSpeed(session.segments[session.segments.length - 1], 30);
 }
 
 /** Close the current lap. */
@@ -276,16 +287,63 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(LOCATION_TASK, 
   await ingest(data.locations);
 });
 
-/** Pick up a session left by a killed app and restart GPS for it. Called once at app start. */
-let restoring: Promise<Session | null> | null = null;
-export function restore(): Promise<Session | null> {
-  restoring ??= (async () => {
-    await locked(load);
-    if (session && !(await isTracking())) await startUpdates(session.sport, !!session.workout);
-    notify();
-    return session;
-  })().finally(() => { restoring = null; });
-  return restoring;
+// ---------- steps ----------
+// The phone's hardware step counter (almost no battery). Its readings are a running total since we
+// subscribed; only the increase while recording is added, so paused time doesn't count.
+let stepSub: { remove(): void } | null = null;
+let stepLast: number | null = null;
+async function startSteps() {
+  if (stepSub || !session || !isOnFoot(session.sport)) return;
+  try {
+    if (!(await Pedometer.isAvailableAsync()) || !(await Pedometer.getPermissionsAsync()).granted) return;
+    if (!session || stepSub) return;
+    session.steps ??= 0;
+    stepLast = null;
+    stepSub = Pedometer.watchStepCount(({ steps }) => {
+      const d = stepDelta(stepLast, steps);
+      stepLast = steps;
+      if (session && session.status === 'recording' && d > 0) session.steps = (session.steps ?? 0) + d; // shown on the next 1 s tick
+    });
+  } catch { /* no step sensor: activities fall back to an estimate */ }
+}
+function stopSteps() { stepSub?.remove(); stepSub = null; stepLast = null; }
+export const currentSteps = () => session?.steps;
+
+/** Ask once for the "Physical activity" permission the step counter needs (Android 10+). */
+export async function ensureStepPermission(): Promise<boolean> {
+  try {
+    if (!(await Pedometer.isAvailableAsync())) return false;
+    const p = await Pedometer.getPermissionsAsync();
+    if (p.granted) return true;
+    return p.canAskAgain ? (await Pedometer.requestPermissionsAsync()).granted : false;
+  } catch { return false; }
+}
+
+export async function restore(): Promise<Session | null> {
+  await locked(load);
+  if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
+  if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
+  if (session) startSteps();
+  syncWarm();
+  notify();
+  return session;
+}
+
+// ---------- watchdog ----------
+// Some Android builds silently stop delivering fixes (provider hiccup, OEM battery killers). Called every
+// second by the Record screen: if a recording has had no fix for 20 s, GPS is restarted.
+let restartedAt = 0;
+let restarting = false;
+export async function watchdog() {
+  if (!session || !appActive || restarting) return;
+  const now = Date.now();
+  if (now - lastFixAt < 20_000 || now - restartedAt < 45_000) return;
+  restarting = true;
+  restartedAt = now;
+  try {
+    await stopUpdates();
+    if (session) await startUpdates();
+  } catch { /* try again on the next tick */ } finally { restarting = false; }
 }
 
 async function isTracking() {
@@ -294,6 +352,28 @@ async function isTracking() {
 }
 
 export type PermissionResult = 'background' | 'foreground' | 'denied';
+export type Precision = 'precise' | 'approximate' | 'off';
+
+/** Whether the OS will hand over GNSS-grade fixes: location on, and precise (not approximate) access. */
+export async function locationPrecision(): Promise<Precision> {
+  try { if (!(await Location.hasServicesEnabledAsync())) return 'off'; } catch { /* unknown: assume on */ }
+  const p = await Location.getForegroundPermissionsAsync().catch(() => null);
+  if (p?.granted && (p.android?.accuracy === 'coarse' || p.ios?.accuracy === 'reduced')) return 'approximate';
+  return 'precise';
+}
+
+/**
+ * Ask the OS for its best location mode. Android can fix both cases in-app: the permission dialog
+ * offers "Change to precise location", and the Play-services dialog turns on location with Google
+ * Location Accuracy. iOS can only be changed in Settings, so the caller offers that.
+ */
+export async function improvePrecision(): Promise<Precision> {
+  const now = await locationPrecision();
+  if (now === 'precise' || Platform.OS !== 'android') return now;
+  if (now === 'approximate') await Location.requestForegroundPermissionsAsync().catch(() => null);
+  else await Location.enableNetworkProviderAsync().catch(() => undefined);
+  return locationPrecision();
+}
 
 const BG_ASKED = 'stride:bg-permission-asked';
 
@@ -317,12 +397,17 @@ export async function ensurePermissions(askBackground = false): Promise<Permissi
   return 'foreground';
 }
 
-async function startUpdates(sport: Sport, hasWorkout = false) {
+async function startUpdates() {
   const opts: Location.LocationOptions = {
-    accuracy: settings.gpsMode === 'saver' ? Location.Accuracy.High : Location.Accuracy.BestForNavigation,
+    // Highest = GNSS at full rate on Android (same as BestForNavigation there) and kCLLocationAccuracyBest
+    // on iOS; Apple reserves BestForNavigation for plugged-in navigation apps because of its extra sensor cost.
+    accuracy: settings.gpsMode === 'saver' ? Location.Accuracy.High : Location.Accuracy.Highest,
     timeInterval: settings.gpsMode === 'saver' ? 3000 : 1000,
-    // auto-pause and interval timers need fixes while standing still too
-    distanceInterval: settings.autoPause || hasWorkout ? 0 : sport === 'ride' ? 5 : 2,
+    // No distance filter: a fix every interval even when standing still, so the live position and
+    // accuracy stay current (a distance filter makes the OS go quiet and the app thinks GPS is lost).
+    // Jitter is removed by the Kalman filter and the stationary gate instead.
+    distanceInterval: 0,
+    mayShowUserSettingsDialog: true, // Android: offer to turn on high-accuracy location if it is off
   };
   const bg = await Location.getBackgroundPermissionsAsync().catch(() => null);
   if (bg?.status === 'granted') {
@@ -331,11 +416,13 @@ async function startUpdates(sport: Sport, hasWorkout = false) {
         ...opts,
         activityType: Location.ActivityType.Fitness,
         pausesUpdatesAutomatically: false,
-        // battery saver: let the OS batch fixes and wake the JS runtime less often
-        deferredUpdatesInterval: settings.gpsMode === 'saver' ? 10_000 : 0,
+        // Background only (both platforms deliver immediately while the app is on screen): fixes are still
+        // taken every second, but handed to JS in batches, so the phone wakes the app every 5 s (15 s in
+        // battery saver) instead of every second. Distance and route are identical.
+        deferredUpdatesInterval: settings.gpsMode === 'saver' ? 15_000 : 5_000,
         showsBackgroundLocationIndicator: true,
         foregroundService: {
-          notificationTitle: 'Stride is recording',
+          notificationTitle: 'TBDI FitTrack is recording',
           notificationBody: 'Your activity is being tracked.',
           notificationColor: '#F2762E',
         },
@@ -343,7 +430,9 @@ async function startUpdates(sport: Sport, hasWorkout = false) {
       return;
     } catch { /* fall through to foreground watcher */ }
   }
-  const w = await Location.watchPositionAsync(opts, (l) => { ingest([l]); });
+  const w = await Location.watchPositionAsync(opts, (l) => { ingest([l]); }, () => {
+    restartedAt = 0; lastFixAt = 0; // let the watchdog restart it on the next tick
+  });
   watcher?.remove(); // never leave a second watcher running
   watcher = w;
 }
@@ -358,14 +447,53 @@ async function stopUpdates() {
   } catch { /* ignore */ }
 }
 
-/** Start GPS without recording, so the map can show the current position before Start. */
-export async function warmUp(): Promise<Location.LocationSubscription | null> {
+// ---------- pre-start GPS ("warm-up") ----------
+// Runs only while the Record tab is visible, the app is in the foreground and nothing is recording,
+// so GPS never stays on behind the user's back (screen off, other app, or after Start, when the
+// recording's own location updates take over).
+let warmWanted = false;
+let warmSub: Location.LocationSubscription | null = null;
+let warmBusy = false;
+let warmAgain = false;
+export function setWarmUp(on: boolean) { warmWanted = on; syncWarm(); }
+async function syncWarm() {
+  if (warmBusy) { warmAgain = true; return; }
+  warmBusy = true;
   try {
-    const l = await Location.getLastKnownPositionAsync();
-    if (l) { lastFix = toPoint(l); notify(); }
+    do {
+      warmAgain = false;
+      const want = warmWanted && appActive && !session;
+      if (want && !warmSub) warmSub = await warmUp();
+      else if (!want && warmSub) { warmSub.remove(); warmSub = null; }
+    } while (warmAgain);
+  } finally { warmBusy = false; }
+}
+
+/**
+ * Start GPS without recording, so the map shows the current position and the GPS chip a live
+ * accuracy before Start. Runs the same filter as a recording, so Start begins with a settled fix.
+ */
+async function warmUp(): Promise<Location.LocationSubscription | null> {
+  const onFix = (loc: Location.LocationObject) => {
+    if (session) return; // a running session ingests these itself
+    const f = toFix(loc);
+    lastFixAt = Date.now();
+    lastFixAge = staleness(f);
+    if (lastFix && f.t <= lastFix.t) return;
+    lastFix = toPoint(f);
+    if (accOk(f, 35)) {
+      warmKf = kalmanStep(warmKf, f, 1);
+      if (!warmKf.outlier) lastFix = toPoint({ ...f, lat: warmKf.lat, lng: warmKf.lng });
+    }
+    notify();
+  };
+  try {
+    // only a recent cached fix: an old one would put the dot somewhere you no longer are
+    const l = await Location.getLastKnownPositionAsync({ maxAge: 15_000, requiredAccuracy: 50 }).catch(() => null);
+    if (l && !session) { lastFix = toPoint(toFix(l)); notify(); }
     return await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 2000, distanceInterval: 2 },
-      (loc) => { lastFix = toPoint(loc); notify(); },
+      { accuracy: Location.Accuracy.Highest, timeInterval: 1000, distanceInterval: 0, mayShowUserSettingsDialog: true },
+      onFix,
     );
   } catch { return null; }
 }
@@ -380,20 +508,28 @@ export async function start(sport: Sport, workoutId?: string | null) {
       await load();
       if (session) return false; // already recording
       const now = Date.now();
-      // seed with the warm-up fix only if it is fresh; an old last-known position would add a phantom jump
-      const seed = lastFix && (lastFix.acc ?? 99) <= 35 && now - lastFix.t < 10_000 ? [{ ...lastFix, t: now }] : [];
-      persistedPoints = 0; // a new track: every chunk gets written fresh
+      // begin exactly where you stand, but only from a fresh, accurate fix
+      // (arrived in the last 3 s and is itself recent: not an old cached fix handed over when GPS started;
+      // the very first fix can't be judged by the clock-skew estimate, so its own time is checked too)
+      const fresh = lastFix && now - lastFixAt <= 3_000 && lastFixAge <= 10_000 && Math.abs(now - lastFix.t) <= 30_000
+        && accOk(lastFix, 20) ? lastFix : null;
+      const kf = fresh && warmKf && warmKf.t === fresh.t ? { ...warmKf, rej: 0, outlier: false } : null;
       session = {
         sport, startedAt: now, status: 'recording', segStartedAt: now, activityId: newActivityId(now),
         pausedMs: 0, pauseStartedAt: null, distanceM: 0, lastCueKm: 0,
         workout: findWorkout(workoutId) ? startProgress(workoutId!, 0, 0) : null,
-        segments: [seed],
+        segments: [fresh ? [fresh] : []],
+        kf,
       };
       await persist();
       return true;
     });
     if (!created) return;
-    await startUpdates(sport, !!session?.workout);
+    lastFixAt = Date.now();
+    restartedAt = Date.now();
+    await startUpdates();
+    startSteps();
+    syncWarm(); // the recording's own updates take over from the pre-start GPS
     const w = findWorkout(workoutId);
     if (w && session?.workout) say(`${w.name}. ${stepCue(w, session.workout)}`, 'en');
     notify();
@@ -433,56 +569,56 @@ export function resume() {
 
 export async function discard() {
   Speech.stop();
+  stopSteps();
   await stopUpdates();
   await locked(async () => { session = null; await persist(); });
+  syncWarm();
   notify();
 }
 
-/**
- * Save the session as an activity. The session is only cleared once the activity is safely stored: if
- * saving fails, the recording stays (and GPS restarts) so nothing is lost and Save can be tried again.
- */
 export async function finish(): Promise<Activity | null> {
   Speech.stop();
+  stopSteps();
   await stopUpdates();
   const gear = session ? await defaultGear(gearKindFor(session.sport)).catch(() => undefined) : undefined;
-  let activity: Activity | null;
-  try {
-    activity = await locked(() => saveSession(gear?.id));
-  } catch (e) {
-    if (session) await startUpdates(session.sport, !!session.workout).catch(() => undefined);
-    notify();
-    throw e;
-  }
+  const activity = await locked(async () => {
+    if (!session) return null;
+    const s = session;
+    const segments = s.segments.filter((seg) => seg.length > 1);
+    const now = Date.now();
+    const movingSec = Math.round(sessionMovingSec(s, now));
+    const distanceM = totalDistance(segments);
+    const a: Activity = {
+      id: (s.activityId ??= newActivityId(s.startedAt)), // stable across retries: a retried save overwrites
+      name: defaultName(s.sport, s.startedAt),
+      sport: s.sport,
+      startedAt: s.startedAt,
+      movingSec,
+      elapsedSec: Math.round((now - s.startedAt) / 1000),
+      distanceM,
+      elevGainM: Math.round(elevationGain(segments)),
+      segments,
+      gearId: gear?.id,
+      laps: s.laps?.length ? lapsFromMarks(s.laps, distanceM, movingSec) : undefined,
+      maxSpeedMs: s.maxSpeedMs,
+      workoutName: findWorkout(s.workout?.workoutId)?.name,
+      steps: isOnFoot(s.sport) && s.steps ? s.steps : undefined,
+    };
+    // Save first, clear the recording only once the activity is safely stored. If saving fails
+    // the recording stays (paused) so nothing is lost and Save can simply be tried again.
+    try {
+      await saveActivity(a);
+    } catch (e) {
+      if (s.status === 'recording') { s.status = 'paused'; s.autoPaused = false; s.pauseStartedAt = now; }
+      await persist().catch(() => undefined);
+      throw e;
+    }
+    session = null;
+    await persist();
+    return a;
+  });
   if (activity) autoSync();
+  syncWarm();
   notify();
   return activity;
-}
-
-async function saveSession(gearId: string | undefined): Promise<Activity | null> {
-  if (!session) return null;
-  const s = session;
-  const segments = s.segments.filter((seg) => seg.length > 1);
-  const now = Date.now();
-  const movingSec = Math.round(sessionMovingSec(s, now));
-  const distanceM = totalDistance(segments);
-  const a: Activity = {
-    id: (s.activityId ??= newActivityId(s.startedAt)), // stable across retries
-    name: defaultName(s.sport, s.startedAt),
-    sport: s.sport,
-    startedAt: s.startedAt,
-    movingSec,
-    elapsedSec: Math.round((now - s.startedAt) / 1000),
-    distanceM,
-    elevGainM: Math.round(elevationGain(segments)),
-    segments,
-    gearId,
-    laps: s.laps?.length ? lapsFromMarks(s.laps, distanceM, movingSec) : undefined,
-    maxSpeedMs: s.maxSpeedMs,
-    workoutName: findWorkout(s.workout?.workoutId)?.name,
-  };
-  await saveActivity(a);
-  session = null;
-  await persist();
-  return a;
 }

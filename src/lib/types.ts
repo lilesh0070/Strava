@@ -30,6 +30,8 @@ export type Activity = {
   maxSpeedMs?: number;
   manual?: boolean; // entered by hand (treadmill, gym, forgot to record)
   workoutName?: string;
+  /** Steps counted by the phone's step sensor during the recording (absent: estimate from distance). */
+  steps?: number;
   /** Present on list summaries: segments are simplified for drawing, best efforts are pre-computed. */
   lite?: boolean;
   efforts?: Record<string, number>; // metres → fastest seconds
@@ -50,14 +52,22 @@ export type Settings = {
   theme: ThemeChoice;
   gpsMode: GpsMode;
   autoCheckUpdates: boolean;
+  betaUpdates: boolean; // also offer pre-release (test) builds
   targetPaceSec: number | null; // pace coach target (sec/km); null = off
   reminder: boolean;
   reminderHour: number;
   language: 'en' | 'hi';
+  // workday wellness: stretch / water / eye-break nudges during work hours
+  breakReminders: boolean;
+  breakEveryMin: number; // 45 | 60 | 90 | 120
+  workStartH: number;
+  workEndH: number;
+  workDays: 'mon-fri' | 'mon-sat';
 };
 export const DEFAULT_SETTINGS: Settings = {
-  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, targetPaceSec: null,
+  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, betaUpdates: false, targetPaceSec: null,
   reminder: false, reminderHour: 18, language: 'en',
+  breakReminders: false, breakEveryMin: 60, workStartH: 9, workEndH: 18, workDays: 'mon-fri',
 };
 
 export type Session = {
@@ -81,6 +91,7 @@ export type Session = {
   autoPausedMs?: number;
   /** Id the saved activity will get, fixed at start so a retried save overwrites instead of duplicating. */
   activityId?: string;
+  steps?: number; // counted while recording (not while paused)
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {

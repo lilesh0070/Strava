@@ -2,13 +2,14 @@ import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Alert, AppState, Linking, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed, totalDistance } from '../../lib/geo';
+import { fmtSteps, isOnFoot } from '../../lib/steps';
 import { gpsHealth } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
 import { newRecords } from '../../lib/records';
@@ -29,6 +30,8 @@ const useTracker = () => {
 };
 
 function KeepAwake() { useKeepAwake(); return null; }
+/** Stable empty route, so the map doesn't redraw every second before Start. */
+const NO_SEGMENTS: never[] = [];
 
 export default function Record() {
   const { C, S, F } = useTheme();
@@ -37,8 +40,10 @@ export default function Record() {
   const { session, fix } = useTracker();
   const [sport, setSport] = useState<Sport>('run');
   const [now, setNow] = useState(Date.now);
-  const [focused, setFocused] = useState(false);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
+  const [precision, setPrecision] = useState<tracker.Precision>('precise');
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
   const [countdown, setCountdown] = useState<number | null>(null);
   const selectedWorkout = useSelectedWorkout();
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -47,40 +52,47 @@ export default function Record() {
   // (an in-progress session is restored at app start, in the root layout)
   useEffect(() => () => { if (cdTimer.current) clearInterval(cdTimer.current); }, []);
 
-  // live clock: drives the timer while recording, and GPS-signal freshness while this tab is open
+  // live clock + GPS watchdog while recording
   const recording = !!session;
   useEffect(() => {
-    if (!recording && !focused) return;
+    if (!recording) return;
     const id = setInterval(() => {
       // nobody sees the screen in the background: skip the re-render (and map redraw), keep the workout ticking
       if (AppState.currentState === 'active') setNow(Date.now());
-      if (recording) tracker.workoutTick();
+      tracker.workoutTick();
+      tracker.watchdog();
     }, 1000);
     return () => clearInterval(id);
-  }, [recording, focused]);
+  }, [recording]);
 
-  // show current position while this tab is focused
+  // show current position while this tab is focused (the tracker pauses this GPS whenever the app
+  // is in the background or a recording runs); re-render every second so the GPS chip turns to
+  // "Finding GPS…" as soon as fixes stop instead of showing a stale accuracy
   useFocusEffect(useCallback(() => {
-    let sub: { remove(): void } | null = null;
     let cancelled = false;
-    setFocused(true);
-    tracker.ensurePermissions(false).then(async (p) => {
+    const checkPrecision = () => tracker.locationPrecision().then((p) => { if (!cancelled) setPrecision(p); });
+    // only asks for foreground location here; "Allow all the time" is asked once, on Start
+    tracker.ensurePermissions(false).then((p) => {
       setPerm(p);
       if (p === 'denied' || cancelled) return;
-      sub = await tracker.warmUp();
-      if (cancelled) sub?.remove();
+      checkPrecision();
+      tracker.setWarmUp(true);
     });
-    return () => { cancelled = true; sub?.remove(); setFocused(false); };
+    const id = setInterval(() => { if (!tracker.getSession()) setNow(Date.now()); }, 1000);
+    // back from system settings: the user may have just turned on precise location
+    const app = AppState.addEventListener('change', (st) => { if (st === 'active') checkPrecision(); });
+    return () => { cancelled = true; tracker.setWarmUp(false); clearInterval(id); app.remove(); };
   }, []));
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
-  // the running total is kept incrementally; summing every point each second gets slow on long sessions
-  const dist = active ? active.distanceM ?? totalDistance(active.segments) : 0;
+  // running total kept by the tracker: no need to re-measure the whole route every second
+  const dist = active ? (active.distanceM ?? totalDistance(active.segments)) : 0;
   const moving = active ? sessionMovingSec(active, now) : 0;
-  const health = gpsHealth(fix, now);
-  const gpsOk = health === 'good';
-  const cur = tracker.currentSpeed(now);
+  // age from when the fix arrived, not its GPS timestamp, so a skewed GPS clock can't fake a signal
+  const health = gpsHealth(fix ? { ...fix, t: tracker.getLastFixAt() } : null, now);
+  const gpsOk = health === 'good' && precision === 'precise';
+  const cur = tracker.currentSpeed();
   const laps = active?.laps ?? [];
   // the open lap always starts at the last press, so the display changes the moment Lap is tapped
   const lastMark = laps[laps.length - 1] ?? { distanceM: 0, movingSec: 0 };
@@ -89,6 +101,22 @@ export default function Record() {
   const begin = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     try { await tracker.start(sport, selectedWorkout); } finally { starting.current = false; }
+  };
+
+  /** Ask for precise location / location on. Resolves true when recording may go ahead. */
+  const fixPrecision = async (): Promise<boolean> => {
+    const pr = await tracker.improvePrecision();
+    setPrecision(pr);
+    if (pr === 'precise') return true;
+    return new Promise<boolean>((resolve) => Alert.alert(
+      pr === 'off' ? t('rec.locOffTitle') : t('rec.approxTitle'),
+      pr === 'off' ? t('rec.locOffBody') : t('rec.approxBody'),
+      [
+        { text: t('rec.cancel'), style: 'cancel', onPress: () => resolve(false) },
+        { text: t('rec.openSettings'), onPress: () => { Linking.openSettings(); resolve(false); } },
+        ...(pr === 'approximate' ? [{ text: t('rec.anyway'), onPress: () => resolve(true) }] : []),
+      ],
+    ));
   };
 
   const onStart = async () => {
@@ -117,7 +145,7 @@ export default function Record() {
     }, 1000);
   };
 
-  /** Permission and GPS-quality checks before recording. Resolves false if the user should not start yet. */
+  /** Permission, precision and GPS-quality checks before recording. Resolves false if it should not start yet. */
   const prepareStart = async () => {
     // permission may have changed in system Settings since this tab was focused; Start is also where
     // "Allow all the time" is requested (once)
@@ -129,14 +157,18 @@ export default function Record() {
       ]);
       return false;
     }
-    if (health !== 'good') {
-      return new Promise<boolean>((resolve) => Alert.alert(
+    if (precision !== 'precise' && !(await fixPrecision())) return false;
+    if (health !== 'good' && precision === 'precise') {
+      const go = await new Promise<boolean>((resolve) => Alert.alert(
         health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
         t('rec.weakBody'),
         [{ text: t('rec.wait'), style: 'cancel', onPress: () => resolve(false) }, { text: t('rec.anyway'), onPress: () => resolve(true) }],
         { cancelable: true, onDismiss: () => resolve(false) },
       ));
+      if (!go) return false;
     }
+    // step counter: the "Physical activity" permission is asked once, on the first walk or run
+    if (isOnFoot(sport)) await tracker.ensureStepPermission();
     return true;
   };
 
@@ -158,7 +190,7 @@ export default function Record() {
           let a;
           try { a = await tracker.finish(); }
           catch (e) {
-            // the recording is kept, so the user can try again
+            // the recording is kept (paused), so the user can try again
             Alert.alert(t('rec.saveFailed'), `${t('rec.saveFailedBody')}\n\n${String((e as Error)?.message ?? e)}`);
             return;
           }
@@ -185,14 +217,21 @@ export default function Record() {
       {active?.status === 'recording' && <KeepAwake />}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-        <RouteMap segments={active?.segments ?? []} current={fix} follow style={{ flex: 1, borderRadius: 26 }} />
+        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={{ flex: 1, borderRadius: 26 }} />
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          {pill(<>
-            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: gpsOk ? C.success : health === 'weak' ? '#F5A524' : C.danger }} />
-            <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
-              {gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m` : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m` : active ? t('rec.gpsLost') : t('rec.finding')}
-            </Text>
-          </>)}
+          <Pressable disabled={precision === 'precise'} onPress={fixPrecision} accessibilityRole="button">
+            {pill(<>
+              <View style={{ width: 9, height: 9, borderRadius: 5,
+                backgroundColor: precision === 'off' ? C.danger : gpsOk ? C.success : precision === 'approximate' || health === 'weak' ? '#F5A524' : C.danger }} />
+              <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
+                {precision === 'off' ? t('rec.locOff')
+                  : precision === 'approximate' ? t('rec.approx')
+                  : gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m`
+                  : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m`
+                  : active ? t('rec.gpsLost') : t('rec.finding')}
+              </Text>
+            </>)}
+          </Pressable>
           <SettingsButton />
         </View>
         {perm === 'foreground' && (
@@ -229,6 +268,13 @@ export default function Record() {
               <Stat label={`${t('rec.lap')} ${laps.length + 1}`} value={fmtDuration(openLap.durationSec)} />
               <Stat label={t('rec.lapDist')} value={fmtKm(openLap.distanceM)} unit="km" />
             </View>
+            {isOnFoot(active.sport) && active.steps != null && (
+              <View style={{ flexDirection: 'row' }}>
+                <Stat label={t('rec.steps')} value={fmtSteps(active.steps)} />
+                <Stat label={t('rec.cadence')} value={moving >= 60 && active.steps ? String(Math.round(active.steps / (moving / 60))) : '–'} unit="spm" />
+                <View style={{ flex: 1 }} />
+              </View>
+            )}
             {(() => {
               const w = findWorkout(active.workout?.workoutId);
               if (!w || !active.workout) return null;

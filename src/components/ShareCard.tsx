@@ -39,7 +39,7 @@ const ShareCard = forwardRef<ShareCardHandle, { a: Activity }>(function ShareCar
         {stat(info.usesPace ? 'PACE' : 'KM/H', info.usesPace ? fmtPace(a.distanceM, a.movingSec) : fmtSpeed(a.distanceM, a.movingSec))}
         {stat('TIME', fmtDuration(a.movingSec))}
       </View>
-      <Text style={{ color: C.accent, fontWeight: '900', textAlign: 'center', letterSpacing: 2 }}>STRIDE</Text>
+      <Text style={{ color: C.accent, fontWeight: '900', textAlign: 'center', letterSpacing: 2 }}>TBDI FITTRACK</Text>
     </View>
   );
 });
