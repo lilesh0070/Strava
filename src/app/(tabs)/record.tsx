@@ -29,6 +29,8 @@ const useTracker = () => {
 };
 
 function KeepAwake() { useKeepAwake(); return null; }
+/** Stable empty route, so the map doesn't redraw every second before Start. */
+const NO_SEGMENTS: never[] = [];
 
 export default function Record() {
   const { C, S, F } = useTheme();
@@ -39,6 +41,8 @@ export default function Record() {
   const [, tick] = useState(0);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
   const [precision, setPrecision] = useState<tracker.Precision>('precise');
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
   const [countdown, setCountdown] = useState<number | null>(null);
   const selectedWorkout = useSelectedWorkout();
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -54,28 +58,28 @@ export default function Record() {
     return () => clearInterval(id);
   }, [session]);
 
-  // show current position while this tab is focused; re-render every second so the GPS chip
-  // turns to "Finding GPS…" as soon as fixes stop instead of showing a stale accuracy
+  // show current position while this tab is focused (the tracker pauses this GPS whenever the app
+  // is in the background or a recording runs); re-render every second so the GPS chip turns to
+  // "Finding GPS…" as soon as fixes stop instead of showing a stale accuracy
   useFocusEffect(useCallback(() => {
-    let sub: { remove(): void } | null = null;
     let cancelled = false;
     const checkPrecision = () => tracker.locationPrecision().then((p) => { if (!cancelled) setPrecision(p); });
-    tracker.ensurePermissions().then(async (p) => {
+    tracker.ensurePermissions().then((p) => {
       setPerm(p);
       if (p === 'denied' || cancelled) return;
       checkPrecision();
-      sub = await tracker.warmUp();
-      if (cancelled) sub?.remove();
+      tracker.setWarmUp(true);
     });
     const id = setInterval(() => { if (!tracker.getSession()) tick((n) => n + 1); }, 1000);
     // back from system settings: the user may have just turned on precise location
     const app = AppState.addEventListener('change', (st) => { if (st === 'active') checkPrecision(); });
-    return () => { cancelled = true; sub?.remove(); clearInterval(id); app.remove(); };
+    return () => { cancelled = true; tracker.setWarmUp(false); clearInterval(id); app.remove(); };
   }, []));
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
-  const dist = active ? totalDistance(active.segments) : 0;
+  // running total kept by the tracker: no need to re-measure the whole route every second
+  const dist = active ? (active.distanceM ?? totalDistance(active.segments)) : 0;
   const moving = active ? sessionMovingSec(active) : 0;
   // age from when the fix arrived, not its GPS timestamp, so a skewed GPS clock can't fake a signal
   const health = gpsHealth(fix ? { ...fix, t: tracker.getLastFixAt() } : null, Date.now());
@@ -178,7 +182,7 @@ export default function Record() {
       {active?.status === 'recording' && <KeepAwake />}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-        <RouteMap segments={active?.segments ?? []} current={fix} follow style={{ flex: 1, borderRadius: 26 }} />
+        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={{ flex: 1, borderRadius: 26 }} />
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Pressable disabled={precision === 'precise'} onPress={fixPrecision} accessibilityRole="button">
             {pill(<>

@@ -2,6 +2,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { BREAK_MESSAGES, breakSlots } from './breaks';
+import { getSettings } from './storage';
 import type { Settings } from './types';
 
 const ID = 'stride-daily-reminder';
@@ -60,4 +61,17 @@ async function scheduleBreaks(s: Settings): Promise<boolean> {
     });
   }
   return true;
+}
+
+/**
+ * Startup check: if reminders are on but the OS lost them (some phones drop alarms after an app
+ * update, a reboot or a battery "clean-up"), schedule them again. Never shows a permission prompt.
+ */
+export async function ensureReminders(): Promise<void> {
+  const s = await getSettings();
+  if (!s.breakReminders && !s.reminder) return;
+  if (!(await Notifications.getPermissionsAsync()).granted) return;
+  const ids = (await Notifications.getAllScheduledNotificationsAsync()).map((n) => n.identifier);
+  if (s.breakReminders && !ids.some((id) => id.startsWith(BREAK_PREFIX))) await setBreakReminders(s);
+  if (s.reminder && !ids.includes(ID)) await setDailyReminder(true, s.reminderHour);
 }

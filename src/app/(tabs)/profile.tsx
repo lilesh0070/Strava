@@ -41,6 +41,12 @@ export default function ProfileScreen() {
   useEffect(() => { getProfile().then(setProfile); }, []);
 
   const acts = useMemo(() => (items ?? []).filter((a) => a.sport === filter), [items, filter]);
+  // badges scan the whole history: compute once per data change, not on every keystroke below
+  const weightKg = profile?.weightKg || 70;
+  const badgesEarned = useMemo(
+    () => [...evaluateAchievements(items ?? []), ...wellnessBadges(log ?? {}, items ?? [], weightKg)].filter((x) => x.earned).length,
+    [items, log, weightKg],
+  );
 
   const weeks = useMemo(() => {
     const thisMon = mondayOf(Date.now());
@@ -100,7 +106,7 @@ export default function ProfileScreen() {
       </NeuCard>
 
       <View style={{ flexDirection: 'row', gap: 16 }}>
-        <NeuTile icon="trophy-variant-outline" title="Badges" subtitle={`${[...evaluateAchievements(items ?? []), ...wellnessBadges(log ?? {}, items ?? [], profile?.weightKg || 70)].filter((x) => x.earned).length} earned`}
+        <NeuTile icon="trophy-variant-outline" title="Badges" subtitle={`${badgesEarned} earned`}
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/achievements')} />
         <NeuTile icon="map-legend" title="Heatmap" subtitle="All routes"
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/heatmap')} />

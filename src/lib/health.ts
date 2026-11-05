@@ -245,19 +245,31 @@ export function wellnessBadges(log: WellnessLog, acts: Activity[], weightKg: num
 }
 
 // ---------- merging (backup restore) ----------
+/** A check-in from a file is only kept if every field is in range (a bad file must not break the app). */
+function validCheckin(c: unknown): CheckIn | undefined {
+  if (!c || typeof c !== 'object') return undefined;
+  const x = c as Record<string, unknown>;
+  const int = (v: unknown, lo: number, hi: number) => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+  const ok = int(x.mood, 1, 5) && int(x.energy, 1, 5) && int(x.stress, 1, 3)
+    && typeof x.sleepH === 'number' && x.sleepH >= 0 && x.sleepH <= 24;
+  return ok ? { mood: x.mood as number, energy: x.energy as number, stress: x.stress as number, sleepH: x.sleepH as number,
+    at: typeof x.at === 'number' ? x.at : 0 } : undefined;
+}
+
 /** Merge two logs without losing anything: counts take the larger value, an existing check-in wins. */
 export function mergeLogs(local: WellnessLog, incoming: WellnessLog): WellnessLog {
   const out: WellnessLog = { ...local };
   for (const [k, d] of Object.entries(incoming ?? {})) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || !d || typeof d !== 'object') continue;
     const l = out[k] ?? emptyDay();
-    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(v, 100_000) : 0);
+    const checkin = l.checkin ?? validCheckin(d.checkin);
     out[k] = {
       waterMl: Math.max(l.waterMl, num(d.waterMl)),
       breaks: Math.max(l.breaks, num(d.breaks)),
       eyeBreaks: Math.max(l.eyeBreaks, num(d.eyeBreaks)),
       mindfulMin: Math.max(l.mindfulMin, num(d.mindfulMin)),
-      ...(l.checkin ?? d.checkin ? { checkin: l.checkin ?? d.checkin } : {}),
+      ...(checkin ? { checkin } : {}),
     };
   }
   return out;

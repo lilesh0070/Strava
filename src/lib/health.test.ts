@@ -134,3 +134,14 @@ test('merge keeps the larger counts and never drops a check-in', () => {
 test('fill placeholders', () => {
   assert.equal(fill('{n} of {of} nights', { n: 3, of: 7 }), '3 of 7 nights');
 });
+
+test('merge drops malformed check-ins and silly numbers from a bad file', () => {
+  const bad = {
+    '2026-11-01': { waterMl: -50, breaks: 'x', eyeBreaks: 1e12, mindfulMin: NaN, checkin: { mood: 9, energy: 2, sleepH: 7, stress: 1 } },
+    '2026-11-02': { waterMl: 500, breaks: 1, eyeBreaks: 0, mindfulMin: 0, checkin: { mood: 4, energy: 3, sleepH: 6.5, stress: 2, at: 5 } },
+  } as unknown as WellnessLog;
+  const m = mergeLogs({}, bad);
+  assert.deepEqual([m['2026-11-01'].waterMl, m['2026-11-01'].breaks, m['2026-11-01'].eyeBreaks, m['2026-11-01'].mindfulMin], [0, 0, 100000, 0]);
+  assert.equal(m['2026-11-01'].checkin, undefined);
+  assert.deepEqual(m['2026-11-02'].checkin, { mood: 4, energy: 3, stress: 2, sleepH: 6.5, at: 5 });
+});

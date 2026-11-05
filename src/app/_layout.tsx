@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import CrashScreen from '../components/CrashScreen';
+import { ensureReminders } from '../lib/reminders';
 import ToastHost from '../components/ToastHost';
 import UpdateBanner from '../components/UpdateBanner';
 import { I18nProvider } from '../lib/i18n';
@@ -20,6 +21,8 @@ if (Platform.OS !== 'web') {
 /** Tapping a reminder opens the matching screen (e.g. a stretch break), also from a cold start. Native only. */
 function NotificationLinks() {
   const last = Notifications.useLastNotificationResponse();
+  // a few seconds after launch, so it never competes with the first screen
+  useEffect(() => { const id = setTimeout(() => { ensureReminders().catch(() => undefined); }, 4000); return () => clearTimeout(id); }, []);
   useEffect(() => {
     if (!last || last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
     const url = last.notification.request.content.data?.url;

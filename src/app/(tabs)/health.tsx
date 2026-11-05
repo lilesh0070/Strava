@@ -140,7 +140,8 @@ export default function HealthScreen() {
   const activeMin = Math.round(minutes[today] ?? 0);
   const goal = waterGoalMl(weight, activeMin);
   const score = dailyScore(day, activeMin, goal);
-  const streak = log ? scoreStreak(log, minutes, weight, today) : 0;
+  const streak = useMemo(() => (log ? scoreStreak(log, minutes, weight, today) : 0), [log, minutes, weight, today]);
+  const checkins = useMemo(() => (log ? checkinStreak(log, today) : 0), [log, today]);
   const week = useMemo(() => (log ? weekSummary(log, acts, weight, today) : null), [log, acts, weight, today]);
   const tips = useMemo(() => (log ? insights(log, acts, weight) : []), [log, acts, weight]);
   const previousCheckin = useMemo(() => {
@@ -254,7 +255,7 @@ export default function HealthScreen() {
 
         {/* daily check-in */}
         <CheckInCard key={`${today}-${day.checkin?.at ?? 0}`} today={day.checkin} previous={previousCheckin}
-          streak={log ? checkinStreak(log, today) : 0} />
+          streak={checkins} />
 
         {/* insights */}
         {tips.length > 0 && (

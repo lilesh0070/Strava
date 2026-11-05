@@ -59,6 +59,7 @@ AppState.addEventListener('change', (st) => {
   appActive = st === 'active';
   if (appActive) notify();
   else persist().catch(() => undefined); // make sure nothing is lost if the OS kills us
+  syncWarm(); // pre-start GPS only runs while the app is on screen
 });
 function notify() { if (appActive) listeners.forEach((l) => l()); }
 
@@ -117,7 +118,7 @@ function staleness(f: GpsFix): number {
   if (lags.length > 30) lags.shift();
   return Date.now() - f.t - Math.min(...lags);
 }
-const STALE_MS = 10_000;
+const STALE_MS = 30_000; // cached fixes are minutes old; background batches are at most ~15 s old
 const accOk = (f: { acc: number | null }, max: number) => f.acc != null && f.acc <= max;
 
 export function ingest(locations: Location.LocationObject[]) {
@@ -263,6 +264,7 @@ export async function restore(): Promise<Session | null> {
   await locked(load);
   if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
   if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
+  syncWarm();
   notify();
   return session;
 }
@@ -325,7 +327,9 @@ export async function ensurePermissions(): Promise<PermissionResult> {
 
 async function startUpdates() {
   const opts: Location.LocationOptions = {
-    accuracy: settings.gpsMode === 'saver' ? Location.Accuracy.High : Location.Accuracy.BestForNavigation,
+    // Highest = GNSS at full rate on Android (same as BestForNavigation there) and kCLLocationAccuracyBest
+    // on iOS; Apple reserves BestForNavigation for plugged-in navigation apps because of its extra sensor cost.
+    accuracy: settings.gpsMode === 'saver' ? Location.Accuracy.High : Location.Accuracy.Highest,
     timeInterval: settings.gpsMode === 'saver' ? 3000 : 1000,
     // No distance filter: a fix every interval even when standing still, so the live position and
     // accuracy stay current (a distance filter makes the OS go quiet and the app thinks GPS is lost).
@@ -340,8 +344,10 @@ async function startUpdates() {
         ...opts,
         activityType: Location.ActivityType.Fitness,
         pausesUpdatesAutomatically: false,
-        // battery saver: let the OS batch fixes and wake the JS runtime less often
-        deferredUpdatesInterval: settings.gpsMode === 'saver' ? 10_000 : 0,
+        // Background only (both platforms deliver immediately while the app is on screen): fixes are still
+        // taken every second, but handed to JS in batches, so the phone wakes the app every 5 s (15 s in
+        // battery saver) instead of every second. Distance and route are identical.
+        deferredUpdatesInterval: settings.gpsMode === 'saver' ? 15_000 : 5_000,
         showsBackgroundLocationIndicator: true,
         foregroundService: {
           notificationTitle: 'TBDI FitTrack is recording',
@@ -367,11 +373,33 @@ async function stopUpdates() {
   } catch { /* ignore */ }
 }
 
+// ---------- pre-start GPS ("warm-up") ----------
+// Runs only while the Record tab is visible, the app is in the foreground and nothing is recording,
+// so GPS never stays on behind the user's back (screen off, other app, or after Start, when the
+// recording's own location updates take over).
+let warmWanted = false;
+let warmSub: Location.LocationSubscription | null = null;
+let warmBusy = false;
+let warmAgain = false;
+export function setWarmUp(on: boolean) { warmWanted = on; syncWarm(); }
+async function syncWarm() {
+  if (warmBusy) { warmAgain = true; return; }
+  warmBusy = true;
+  try {
+    do {
+      warmAgain = false;
+      const want = warmWanted && appActive && !session;
+      if (want && !warmSub) warmSub = await warmUp();
+      else if (!want && warmSub) { warmSub.remove(); warmSub = null; }
+    } while (warmAgain);
+  } finally { warmBusy = false; }
+}
+
 /**
  * Start GPS without recording, so the map shows the current position and the GPS chip a live
  * accuracy before Start. Runs the same filter as a recording, so Start begins with a settled fix.
  */
-export async function warmUp(): Promise<Location.LocationSubscription | null> {
+async function warmUp(): Promise<Location.LocationSubscription | null> {
   const onFix = (loc: Location.LocationObject) => {
     if (session) return; // a running session ingests these itself
     const f = toFix(loc);
@@ -390,7 +418,7 @@ export async function warmUp(): Promise<Location.LocationSubscription | null> {
     const l = await Location.getLastKnownPositionAsync({ maxAge: 15_000, requiredAccuracy: 50 }).catch(() => null);
     if (l && !session) { lastFix = toPoint(toFix(l)); notify(); }
     return await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0, mayShowUserSettingsDialog: true },
+      { accuracy: Location.Accuracy.Highest, timeInterval: 1000, distanceInterval: 0, mayShowUserSettingsDialog: true },
       onFix,
     );
   } catch { return null; }
@@ -416,6 +444,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
   lastFixAt = Date.now();
   restartedAt = Date.now();
   await startUpdates();
+  syncWarm(); // the recording's own updates take over from the pre-start GPS
   const w = findWorkout(workoutId);
   if (w && session?.workout) say(`${w.name}. ${stepCue(w, session.workout)}`, 'en');
   notify();
@@ -450,6 +479,7 @@ export async function discard() {
   Speech.stop();
   await stopUpdates();
   await locked(async () => { session = null; await persist(); });
+  syncWarm();
   notify();
 }
 
@@ -484,6 +514,7 @@ export async function finish(): Promise<Activity | null> {
     return a;
   });
   if (activity) { await saveActivity(activity); autoSync(); }
+  syncWarm();
   notify();
   return activity;
 }

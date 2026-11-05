@@ -79,9 +79,13 @@ Wellbeing guidance only, not medical advice.
 - **Shoe wear.** A 700 km life bar with a "replace soon" warning.
 - **Daily reminder** notification at a time you choose.
 - **Battery-friendly tracking.**
-  - Session saved every 15 s instead of every fix.
-  - No UI or map work while the screen is off.
-  - GPS fixes rounded and batched in battery-saver mode.
+  - The live map receives only new points (about 76 bytes a second instead of the whole route, ~70 KB after an hour), and pauses while another tab is showing.
+  - Pre-start GPS runs only while the Record tab is on screen; it stops in the background, on other tabs and once a recording takes over.
+  - In the background, fixes are still taken every second but handed to the app in batches (every 5 s, or 15 s in battery saver), so the phone wakes far less often.
+  - iOS uses "Best" accuracy rather than the navigation mode Apple reserves for plugged-in devices.
+  - Session saved every 15 s instead of every fix, and no UI work while the screen is off.
+  - Break reminders are scheduled with the OS, so the app never runs in the background for them.
+  - Reminders are re-checked at launch and rescheduled if the phone dropped them.
   - Crash screen that keeps your data safe.
 - **Personal records.** Fastest 1k/5k/10k/half, longest, biggest climb. Shown as 🏆 chips and in a pop-up when you beat one.
 - **Weekly insights.** This week vs the same point last week (km, time, % change).

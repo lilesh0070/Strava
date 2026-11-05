@@ -1,9 +1,14 @@
 // Interactive map rendered with Leaflet + OpenStreetMap tiles inside a WebView.
 // No API key needed. Route updates are pushed in via injectJavaScript.
+//
+// Battery: during a recording only the *new* points and the current position cross the bridge
+// (window.append), instead of re-sending and redrawing the whole route every second. A full
+// redraw (window.reset) happens only when the data set itself changes or the page (re)loads.
 import React, { useEffect, useMemo, useRef } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView as RNWebView, type WebViewProps } from 'react-native-webview';
 import type { Point } from '../lib/geo';
+import { mapState, routeUpdate, type MapState } from '../lib/routeSync';
 import { useTheme, type Palette } from '../lib/theme';
 
 type WebViewHandle = { injectJavaScript(js: string): void };
@@ -16,6 +21,8 @@ type Props = {
   follow?: boolean; // live mode: keep the current position centred
   style?: StyleProp<ViewStyle>;
   interactive?: boolean;
+  /** Hidden (e.g. another tab is showing): hold updates and send them in one go when visible again. */
+  paused?: boolean;
 };
 
 const buildHtml = (C: Palette) => `<!DOCTYPE html><html><head>
@@ -28,39 +35,55 @@ const buildHtml = (C: Palette) => `<!DOCTYPE html><html><head>
 </head><body><div id="m"></div><script>
 var map=L.map('m',{zoomControl:false,attributionControl:true}).setView([20.59,78.96],4);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
-var lines=L.layerGroup().addTo(map), marks=L.layerGroup().addTo(map), me=null, fitted=false;
+var lines=L.layerGroup().addTo(map), marks=L.layerGroup().addTo(map), me=null, fitted=false, polys=[];
+var style={color:'${C.route}',weight:5,opacity:.95};
 function dot(ll,c,r){return L.circleMarker(ll,{radius:r||6,color:'#fff',weight:2,fillColor:c,fillOpacity:1});}
-window.update=function(d){
-  lines.clearLayers();marks.clearLayers();
+function setCur(cur,follow){
+  if(!cur) return;
+  if(!me){me=dot(cur,'${C.accent}',8).addTo(map);} else me.setLatLng(cur);
+  if(follow){ if(fitted) map.panTo(cur); else { map.setView(cur,16); fitted=true; } }
+}
+window.reset=function(d){
+  lines.clearLayers();marks.clearLayers();polys=[];
   var all=[];
-  d.segs.forEach(function(s){ if(s.length>1){ L.polyline(s,{color:'${C.route}',weight:5,opacity:.95}).addTo(lines);} all=all.concat(s); });
+  d.segs.forEach(function(s,i){ polys[i]=L.polyline(s,style).addTo(lines); all=all.concat(s); });
   if(!d.follow && all.length){ dot(all[0],'${C.success}').addTo(marks); dot(all[all.length-1],'${C.danger}').addTo(marks); }
-  if(d.cur){ if(!me){me=dot(d.cur,'${C.accent}',8);} me.setLatLng(d.cur).addTo(marks); }
-  if(d.follow && d.cur){ map.setView(d.cur, fitted?map.getZoom():16); fitted=true; }
-  else if(!d.follow && all.length>1 && !fitted){ map.fitBounds(L.latLngBounds(all),{padding:[30,30]}); fitted=true; }
+  setCur(d.cur,d.follow);
+  if(!d.follow && all.length>1 && !fitted){ map.fitBounds(L.latLngBounds(all),{padding:[30,30]}); fitted=true; }
   else if(!d.follow && all.length===1 && !fitted){ map.setView(all[0],15); fitted=true; }
 };
+window.append=function(d){
+  d.segs.forEach(function(x){
+    var i=x[0]; if(!polys[i]) polys[i]=L.polyline([],style).addTo(lines);
+    x[1].forEach(function(p){ polys[i].addLatLng(p); });
+  });
+  setCur(d.cur,d.follow);
+};
+window.update=window.reset;
 </script></body></html>`;
 
-export default function RouteMap({ segments, current, follow = false, style, interactive = true }: Props) {
+export default function RouteMap({ segments, current, follow = false, style, interactive = true, paused = false }: Props) {
   const { C } = useTheme();
   const ref = useRef<WebViewHandle>(null);
   const html = useMemo(() => buildHtml(C), [C]);
-  const payload = useMemo(
-    () =>
-      JSON.stringify({
-        segs: segments.map((s) => s.map((p) => [+p.lat.toFixed(6), +p.lng.toFixed(6)])),
-        cur: current ? [current.lat, current.lng] : null,
-        follow,
-      }),
-    [segments, current, follow],
-  );
-  const latest = useRef(payload);
-  latest.current = payload;
+  const source = useMemo(() => ({ html, baseUrl: 'https://localhost/' }), [html]);
+  const ready = useRef(false);
+  // what the page already has: which segments array, how many points per segment, which position
+  const sent = useRef<MapState>({ segs: null, lens: [], cur: '' });
 
-  useEffect(() => {
-    ref.current?.injectJavaScript(`window.update && window.update(${payload});true;`);
-  }, [payload]);
+  useEffect(() => { ready.current = false; }, [C.scheme]); // the WebView remounts with the new theme
+
+  const sync = (full: boolean) => {
+    if (!ready.current || !ref.current || (paused && !full)) return;
+    const cur = current ? [current.lat, current.lng] : null;
+    const curKey = cur ? cur.join() : '';
+    const u = routeUpdate(sent.current, segments, curKey, full);
+    if (u.kind === 'none') return; // nothing new: no bridge traffic, no redraw
+    ref.current.injectJavaScript(`window.${u.kind}(${JSON.stringify({ segs: u.segs, cur, follow })});true;`);
+    sent.current = mapState(segments, curKey);
+  };
+  // Runs after every render but only compares lengths; segments grow in place while recording.
+  useEffect(() => { sync(false); });
 
   return (
     <View style={[{ overflow: 'hidden', backgroundColor: C.bg }, style]} pointerEvents={interactive ? 'auto' : 'none'}>
@@ -68,8 +91,8 @@ export default function RouteMap({ segments, current, follow = false, style, int
         key={C.scheme}
         ref={ref}
         originWhitelist={['*']}
-        source={{ html, baseUrl: 'https://localhost/' }}
-        onLoadEnd={() => ref.current?.injectJavaScript(`window.update(${latest.current});true;`)}
+        source={source}
+        onLoadEnd={() => { ready.current = true; sync(true); }}
         style={{ backgroundColor: C.bg }}
         scrollEnabled={false}
         javaScriptEnabled
