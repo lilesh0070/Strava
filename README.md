@@ -186,12 +186,36 @@ Create a key once with `keytool -genkeypair -keystore release.jks -storetype PKC
 -keyalg RSA -keysize 4096 -validity 36500 -dname "CN=TBDI FitTrack, O=TBDI, C=IN"` and keep the file and
 password somewhere safe: **if the key is lost, phones can't update again without uninstalling.**
 
-Switching keys: Android only installs an update signed with the same key, so each phone reinstalls once.
-Every release writes the signing certificate's SHA-256 fingerprint into the app and into `update.json`
-(step *Signing fingerprint*); from v1.3.10 on the app notices a key change and shows the steps (back up,
-download the new APK, uninstall, install, restore) instead of a failing installer. So: release v1.3.10 or
-newer with the old key first, let phones update to it, then add the secrets and release the next version.
-The run log shows the fingerprint it signed with.
+Switching keys needs **no uninstall**: the workflow uses APK Signature Scheme v3 key rotation. Gradle always
+signs with the debug key; with the secrets set, step *Sign APK with key rotation*
+([`scripts/sign-apk-rotation.sh`](scripts/sign-apk-rotation.sh), `apksigner` from the runner's newest
+build-tools) then:
+1. makes a lineage debug key → your key with `apksigner rotate` (default capabilities, **no rollback**);
+2. re-signs the APK: v2 signature with the debug key, v3 signature with your key plus the lineage from
+   Android 9 (`--rotation-min-sdk-version 28`);
+3. checks with `apksigner verify -v --print-certs` and `apksigner lineage` that Android 7–8 see only the debug
+   key, Android 9+ see your key with the lineage debug key → your key, nothing else in the APK changed and
+   the native libraries are still 16 KB aligned. Any failure (or a wrong password, alias or keystore) stops
+   the run before anything is published. Passwords only reach `keytool`/`apksigner` as environment variables.
+
+So phones update in place and keep their data. Android 9+ checks v3: the lineage proves your key takes over
+from the debug key, and from then on those phones accept only your key (an APK signed with the debug key
+alone can no longer replace the app). Android 7–8 only check v2, which stays the debug key, so they update in
+place as well (but stay open to debug-key look-alikes). Keep it that way: keep the debug key as the first
+signer, never let Gradle sign with your key directly (`STRIDE_KEYSTORE_FILE` stays unset in CI) and never pass
+`--set-rollback true`.
+
+Every release writes the fingerprint of the key it is effectively signed with into the app (`extra.signer`)
+and into `update.json` (`"signer"`; with rotation also `"lineage": [debug key, your key]`). The app installs
+an update in place when its own key is the signer or in the lineage, and shows the one-time reinstall steps
+(back up, download, uninstall, install, restore) only for a key change **without** a lineage. The app reads
+`lineage` from the first release after v1.3.11; v1.3.10 and v1.3.11 only compare `signer` and would show those
+steps for the switch (versions before v1.3.10 just install it). So:
+1. release a version that reads `lineage`, still with the debug key, and let phones update to it;
+2. run **Actions → Signing self-test → Run workflow**: it re-signs the latest release APK with a throwaway key
+   using the same script and checks the v2/v3 signers and the lineage, so the commands are proven on a runner
+   before your key is involved (no secrets needed; it publishes nothing);
+3. add the four secrets and release the next version. The run log shows both fingerprints.
 
 Optional: OTA JS updates via `eas update` need an Expo account and `npx eas-cli@latest update:configure` (adds `updates.url` and `extra.eas.projectId` to `app.json`). They only reach phones running a version released after that; today's builds have OTA off, so ship fixes as a release.
 

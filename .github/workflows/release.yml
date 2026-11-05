@@ -10,9 +10,10 @@
 #
 # Optional signing secrets (Settings → Secrets and variables → Actions):
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-# Without them the APK is signed with the standard React Native debug key. That key is the same
-# on every build, so updates still install over each other. Once you add your own key, uninstall
-# the old app one time (Android refuses to update across different signing keys).
+# Gradle always signs with the standard React Native debug key. With the secrets, step "Sign APK with key
+# rotation" (scripts/sign-apk-rotation.sh) re-signs it with APK Signature Scheme v3 key rotation: v2 stays the
+# debug key (Android 7-8), v3 is your key with a lineage debug key -> your key (Android 9+), so installed
+# apps update in place without an uninstall. Prove the commands first with the "Signing self-test" workflow.
 name: Release APK
 
 on:
@@ -114,36 +115,53 @@ jobs:
         if: env.SKIP != '1'
         run: npx expo prebuild -p android --no-install --clean
 
+      # The release key is NOT given to Gradle (STRIDE_KEYSTORE_FILE stays unset): Gradle signs with the debug key
+      # and "Sign APK with key rotation" below adds the release key on top of it.
       - name: Prepare signing key
         if: env.SKIP != '1'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "STRIDE_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-            echo "Signing with your release key"
-          else
+          if [ -z "$KEYSTORE_B64" ]; then
             echo "::notice::No ANDROID_KEYSTORE_BASE64 secret, signing with the shared debug key"
+            exit 0
           fi
+          [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] || {
+            echo "::error::ANDROID_KEYSTORE_BASE64 is set, but ANDROID_KEYSTORE_PASSWORD or ANDROID_KEY_ALIAS is missing"; exit 1; }
+          printf '%s' "$KEYSTORE_B64" | base64 --decode --ignore-garbage > "$RUNNER_TEMP/release.jks" 2>/dev/null && [ -s "$RUNNER_TEMP/release.jks" ] || {
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not a base64-encoded keystore"; exit 1; }
+          echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "Signing with key rotation: debug key -> your release key"
 
-      # The app and update.json carry the signing certificate's fingerprint. When the key changes (e.g. from the
-      # shared debug key to a private release key), phones see that the update can't install over the old app
-      # and guide the user through a one-time reinstall instead of failing in the Android installer.
+      # The app and update.json carry the fingerprint of the key the APK is effectively signed with (with key
+      # rotation: the release key, which Android 9+ checks) and, with rotation, the lineage [debug key, release
+      # key]. An app whose own key is in the lineage updates in place; only a key change WITHOUT a lineage makes
+      # phones guide the user through a one-time reinstall instead of failing in the Android installer.
       - name: Signing fingerprint
         if: env.SKIP != '1'
         env:
-          STRIDE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          STRIDE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          if [ -n "$STRIDE_KEYSTORE_FILE" ]; then
-            FP=$(keytool -list -v -keystore "$STRIDE_KEYSTORE_FILE" -storepass "$STRIDE_KEYSTORE_PASSWORD" -alias "$STRIDE_KEY_ALIAS" | awk '/SHA256:/{print $2; exit}')
+          fp() { keytool -list -v -keystore "$1" -alias "$2" -storepass:env "$3" | awk '/SHA256:/{print $2; exit}'; }
+          is_fp() { echo "$1" | grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$'; }
+          DEBUG_KEYSTORE_PASSWORD=android; export DEBUG_KEYSTORE_PASSWORD # the public debug key's password
+          OLD=$(fp android/app/debug.keystore androiddebugkey DEBUG_KEYSTORE_PASSWORD || true)
+          is_fp "$OLD" || { echo "::error::Could not read the debug key's fingerprint (android/app/debug.keystore)"; exit 1; }
+          if [ -n "${RELEASE_KEYSTORE:-}" ]; then
+            NEW=$(fp "$RELEASE_KEYSTORE" "$RELEASE_KEY_ALIAS" RELEASE_KEYSTORE_PASSWORD || true)
+            is_fp "$NEW" || { echo "::error::Could not read the release key (check ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS)"; exit 1; }
+            [ "$NEW" != "$OLD" ] || { echo "::error::The ANDROID_KEYSTORE_* secrets hold the debug key"; exit 1; }
+            FP=$NEW; LINEAGE="$OLD,$NEW"
           else
-            FP=$(keytool -list -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey | awk '/SHA256:/{print $2; exit}')
+            FP=$OLD; LINEAGE=
           fi
-          echo "$FP" | grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' || { echo "::error::Could not read the signing certificate fingerprint"; exit 1; }
           echo "SIGNER=$FP" >> "$GITHUB_ENV"
+          echo "LINEAGE=$LINEAGE" >> "$GITHUB_ENV"
           echo "Signing certificate SHA-256: $FP"
+          [ -z "$LINEAGE" ] || echo "Key rotation lineage: $LINEAGE"
           # embedded in the app's config (read at build time by expo-constants); not committed
           SIGNER="$FP" node -e '
             const fs = require("fs"); const j = JSON.parse(fs.readFileSync("app.json"));
@@ -155,18 +173,34 @@ jobs:
         if: env.SKIP != '1'
         working-directory: android
         env:
-          STRIDE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          STRIDE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          STRIDE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # always the debug key here (see "Prepare signing key"); never hand the release key to Gradle
+          STRIDE_KEYSTORE_FILE: ''
           # one ABI pair keeps the APK small; covers practically every phone from the last 8 years
           ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a,armeabi-v7a
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK
-        if: env.SKIP != '1'
+        if: env.SKIP != '1' && !env.RELEASE_KEYSTORE
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/tbdi-fittrack-${TAG}.apk"
+          ls -lh dist
+
+      # v2 signature: debug key (Android 7-8 keep updating as before). v3: release key + lineage debug -> release
+      # key from Android 9 (--rotation-min-sdk-version 28, no rollback), so those phones move to the release key
+      # in place. The script fails the run unless apksigner verify shows exactly that and the signers match
+      # SIGNER/LINEAGE. Passwords reach keytool/apksigner only as environment variables.
+      - name: Sign APK with key rotation
+        if: env.SKIP != '1' && env.RELEASE_KEYSTORE
+        env:
+          NEW_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          NEW_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          NEW_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          OLD_KEYSTORE=android/app/debug.keystore NEW_KEYSTORE="$RELEASE_KEYSTORE" \
+          EXPECT_SIGNER="$SIGNER" EXPECT_LINEAGE="$LINEAGE" LINEAGE_FILE="$RUNNER_TEMP/rotation.lineage" \
+            bash scripts/sign-apk-rotation.sh android/app/build/outputs/apk/release/app-release.apk "dist/tbdi-fittrack-${TAG}.apk"
           ls -lh dist
 
       # The app reads releases/latest/download/update.json, which GitHub serves from its download CDN
@@ -179,7 +213,7 @@ jobs:
         run: |
           node -e '
             const fs = require("fs"), crypto = require("crypto");
-            const { TAG, REPO, NOTES, SIGNER } = process.env;
+            const { TAG, REPO, NOTES, SIGNER, LINEAGE } = process.env;
             const apk = `tbdi-fittrack-${TAG}.apk`, buf = fs.readFileSync(`dist/${apk}`);
             const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
             const base = `https://github.com/${REPO}/releases`;
@@ -187,6 +221,8 @@ jobs:
               version: app.version, versionCode: app.android.versionCode, apk,
               url: `${base}/download/${TAG}/${apk}`, page: `${base}/tag/${TAG}`,
               size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"), signer: SIGNER,
+              // key rotation: every key the signer descends from, oldest first (apps signed with one update in place)
+              ...(LINEAGE ? { lineage: LINEAGE.split(",") } : {}),
               notes: NOTES || "", publishedAt: new Date().toISOString(),
             }, null, 2) + "\n");
           '
@@ -211,6 +247,10 @@ jobs:
         id: handover
         if: env.SKIP != '1'
         run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Remove the release keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/rotation.lineage"
 
   # The iPhone .ipa (AltStore) is built on macOS after the APK is out, so an iOS problem can never hold
   # up the Android release.

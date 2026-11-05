@@ -22,7 +22,7 @@ export type UpdateState = {
   apk: ApkRelease | null;
   apkProgress: number | null; // 0..1 while downloading
   error: string | null;
-  /** The update is signed with a different key: it has to be installed once by hand (see needsReinstall). */
+  /** The update is signed with a different key whose lineage lacks this app's key: it has to be installed once by hand (see needsReinstall). */
   reinstall: boolean;
 };
 
@@ -40,7 +40,7 @@ export const currentVersion = () => Application.nativeApplicationVersion ?? Cons
 export const currentBuildId = () => Updates.updateId?.slice(0, 8) ?? (Updates.isEmbeddedLaunch ? 'embedded' : 'dev');
 const extra = () => (Constants.expoConfig?.extra ?? {}) as { updateRepo?: string; signer?: string };
 const repo = () => extra().updateRepo ?? 'lilesh0070/strava';
-/** Fingerprint of the key this build was signed with (written into app.json by the release workflow). */
+/** Fingerprint of the key this build is effectively signed with (with key rotation: the newest key); written into app.json by the release workflow. */
 export const ownSigner = () => extra().signer ?? '';
 
 async function checkOta() {

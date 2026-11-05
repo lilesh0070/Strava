@@ -11,8 +11,14 @@ export type ApkRelease = {
   version: string; notes: string; url: string; size: number; name: string; htmlUrl: string; prerelease?: boolean;
   /** SHA-256 of the APK (lowercase hex), checked after the download. */
   sha256?: string;
-  /** SHA-256 fingerprint of the certificate the APK is signed with ("AB:CD:…"). */
+  /** SHA-256 fingerprint of the certificate the APK is signed with ("AB:CD:…"); with key rotation the newest key. */
   signer?: string;
+  /**
+   * APK Signature Scheme v3 key rotation: the keys `signer` descends from, oldest first, ending with `signer`.
+   * An app signed with one of them updates in place (Android 9+ checks the lineage; Android 7–8 only check the
+   * v2 signature, which the release workflow keeps on the oldest key).
+   */
+  lineage?: string[];
 };
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -24,11 +30,22 @@ export function fromManifest(m: unknown): ApkRelease | null {
   const x = m as Record<string, unknown>;
   const version = str(x.version).replace(/^v/i, ''), url = str(x.url);
   if (!/^\d+\.\d+/.test(version) || !/^https:\/\//.test(url) || !/\.apk$/i.test(url)) return null;
-  const sha256 = str(x.sha256).toLowerCase(), signer = normSigner(x.signer);
+  const sha256 = str(x.sha256).toLowerCase(), signer = normSigner(x.signer), lineage = parseLineage(x.lineage, signer);
   return {
     version, url, notes: str(x.notes), size: num(x.size), name: str(x.apk) || url.split('/').pop()!, htmlUrl: str(x.page) || url,
-    ...(/^[0-9a-f]{64}$/.test(sha256) ? { sha256 } : {}), ...(signer ? { signer } : {}),
+    ...(/^[0-9a-f]{64}$/.test(sha256) ? { sha256 } : {}), ...(signer ? { signer } : {}), ...(lineage ? { lineage } : {}),
   };
+}
+
+/**
+ * A key-rotation lineage from update.json: at least two distinct fingerprints, oldest first, the last one being
+ * the signer. Anything else (junk entries, wrong order, no signer) is ignored as a whole, never half-trusted.
+ */
+export function parseLineage(v: unknown, signer: string): string[] | undefined {
+  if (!signer || !Array.isArray(v) || v.length < 2) return undefined;
+  const keys = v.map(normSigner);
+  if (keys.some((k) => !k) || new Set(keys).size !== keys.length || keys[keys.length - 1] !== signer) return undefined;
+  return keys;
 }
 
 /** A certificate fingerprint in one canonical form ("AB:CD:…", 32 bytes), or '' if it isn't one. */
@@ -38,12 +55,18 @@ export function normSigner(v: unknown): string {
 }
 
 /**
- * Android only installs an update signed with the same key as the installed app. When the release key
- * changes (e.g. from the shared debug key to a private one), the update has to be installed once by hand
- * (uninstall, install), so the app says so instead of failing in the installer. Unknown on either side → false.
+ * Android only installs an update signed with the same key as the installed app, or with a newer key whose
+ * v3 rotation lineage contains the app's key. The release workflow moves from the shared debug key to the
+ * private release key that way, so the switch installs in place (Android 9+ via the lineage, Android 7–8 because
+ * the v2 signature stays the debug key). Only a key change without a lineage (e.g. a new key after a lost one)
+ * has to be installed once by hand (uninstall, install), so the app says so instead of failing in the
+ * installer. Unknown on either side → false.
  */
-export const needsReinstall = (rel: ApkRelease | null, ownSigner: string) =>
-  !!rel?.signer && !!normSigner(ownSigner) && rel.signer !== normSigner(ownSigner);
+export function needsReinstall(rel: ApkRelease | null, ownSigner: string): boolean {
+  const own = normSigner(ownSigner);
+  if (!rel?.signer || !own || rel.signer === own) return false;
+  return !rel.lineage?.includes(own);
+}
 
 type ApiAsset = { name?: string; browser_download_url?: string; size?: number };
 type ApiRelease = { tag_name?: string; body?: string; html_url?: string; draft?: boolean; prerelease?: boolean; assets?: ApiAsset[] };
