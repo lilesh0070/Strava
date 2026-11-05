@@ -70,8 +70,9 @@ async function stableRelease(): Promise<ApkRelease | null> {
  * Link for someone who doesn't have the app yet: the newest APK itself (from the release's update.json),
  * or the release page when that can't be read (offline, or an old release without the manifest).
  */
+export const releasePageLink = () => `https://github.com/${repo()}/releases/latest`;
 export async function latestApkLink(): Promise<string> {
-  const page = `https://github.com/${repo()}/releases/latest`;
+  const page = releasePageLink();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
   try {

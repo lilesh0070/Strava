@@ -11,6 +11,7 @@ import * as TaskManager from 'expo-task-manager';
 import { AppState, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Pedometer } from 'expo-sensors';
+import { setAudioModeAsync } from 'expo-audio';
 import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
@@ -42,6 +43,16 @@ let warmKf: KalmanState | null = null;
 let settings: Settings = { ...DEFAULT_SETTINGS };
 /** Speak in the app language (Hindi voice when Hindi is selected). */
 const say = (text: string, lang = settings.language) => Speech.speak(text, { language: speechLanguage(lang) });
+
+/**
+ * iOS: by default speech uses an "ambient" audio session, which the Silent switch mutes and which can't
+ * play while the phone is locked. During a recording use a playback session that keeps going in the
+ * background (with the "audio" background mode) and mixes with the user's music instead of stopping it.
+ */
+function prepareSpeechAudio() {
+  if (Platform.OS !== 'ios') return;
+  setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'mixWithOthers' }).catch(() => undefined);
+}
 const phrase = () => voicePhrases[settings.language] ?? voicePhrases.en;
 const refreshSettings = () => getSettings().then((x) => { settings = x; }).catch(() => undefined);
 refreshSettings();
@@ -323,7 +334,7 @@ export async function restore(): Promise<Session | null> {
   await locked(load);
   if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
   if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
-  if (session) startSteps();
+  if (session) { startSteps(); prepareSpeechAudio(); }
   syncWarm();
   notify();
   return session;
@@ -525,6 +536,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
       return true;
     });
     if (!created) return;
+    prepareSpeechAudio();
     lastFixAt = Date.now();
     restartedAt = Date.now();
     await startUpdates();

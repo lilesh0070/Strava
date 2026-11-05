@@ -1,0 +1,115 @@
+# Build the iPhone app (.ipa) for sideloading with AltStore or SideStore. No Apple Developer account is
+# needed: the .ipa is built without signing and AltStore signs it on the phone with the user's own
+# (free) Apple ID. Apps signed that way run for 7 days; AltStore refreshes them automatically.
+#
+# Runs after every release (called from release.yml) and can be run by hand:
+#   GitHub → Actions → "iOS IPA (AltStore)" → Run workflow → tag (e.g. v1.3.8)
+# Attaches TBDI-FitTrack-v<version>.ipa and altstore.json to that release. altstore.json is an AltStore
+# "source": add https://github.com/lilesh0070/Strava/releases/latest/download/altstore.json in AltStore
+# once and new versions show up there as updates. Without a tag it only test-builds (download the
+# .ipa from the run's artifacts).
+name: iOS IPA (AltStore)
+
+on:
+  # TEMPORARY while the iOS build is being brought up: test-build on pushes to the work branch
+  push:
+    branches: [ccr-e6cbf69f-rqajcz]
+    paths: ['.github/workflows/ios.yml', 'scripts/altstore-source.mjs', 'app.json', 'package.json']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach the .ipa to (e.g. v1.3.8). Empty = test build of this branch.'
+        required: false
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          pod --version
+
+      - name: Build number (same as the Android versionCode)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const j = JSON.parse(fs.readFileSync("app.json"));
+            j.expo.ios.buildNumber = String(j.expo.android.versionCode || 1);
+            fs.writeFileSync("app.json", JSON.stringify(j, null, 2) + "\n");
+            console.log("version", j.expo.version, "build", j.expo.ios.buildNumber);
+          '
+
+      - name: Generate native iOS project
+        run: npx expo prebuild -p ios --no-install --clean
+
+      - name: CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Build (unsigned)
+        run: |
+          WS=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WS" .xcworkspace)
+          echo "workspace $WS, scheme $SCHEME"
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/app.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            -quiet archive
+
+      - name: Package .ipa and AltStore source
+        run: |
+          APP=$(ls -d "$RUNNER_TEMP/app.xcarchive/Products/Applications/"*.app | head -1)
+          VERSION=$(node -p "require('./app.json').expo.version")
+          IPA="TBDI-FitTrack-v$VERSION.ipa"
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/
+          (cd dist && zip -qry "$IPA" Payload && rm -rf Payload)
+          plutil -convert json -o "$RUNNER_TEMP/Info.json" "$APP/Info.plist"
+          NOTES=""
+          if [ -n "$TAG" ]; then NOTES=$(gh release view "$TAG" --json body -q .body 2>/dev/null || true); fi
+          node scripts/altstore-source.mjs "$RUNNER_TEMP/Info.json" "dist/$IPA" "${TAG:-v$VERSION}" "$NOTES" > dist/altstore.json
+          ls -lh dist
+          cat dist/altstore.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: dist/
+          retention-days: 14
+
+      - name: Attach to the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/*.ipa dist/altstore.json --clobber
