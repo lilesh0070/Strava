@@ -1,5 +1,6 @@
-import '../lib/tracker'; // registers the background location task at startup
+import { restore } from '../lib/tracker'; // importing it also registers the background location task at startup
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import CrashScreen from '../components/CrashScreen';
 import ToastHost from '../components/ToastHost';
@@ -9,6 +10,8 @@ import { ThemeProvider, useTheme } from '../lib/theme';
 
 function Root() {
   const { C } = useTheme();
+  // pick up a recording the OS interrupted and restart its GPS right away, not when Record is first opened
+  useEffect(() => { restore().catch(() => undefined); }, []);
   return (
     <>
       <StatusBar style={C.scheme === 'dark' ? 'light' : 'dark'} />

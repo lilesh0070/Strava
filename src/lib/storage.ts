@@ -24,6 +24,15 @@ export function onActivitiesChanged(fn: Listener) {
 const emit = () => listeners.forEach((l) => l());
 export const notifyDataChanged = emit;
 
+// Every write that reads first (index, summaries, gear) goes through one queue, so overlapping saves
+// (e.g. a Restore still running while a recording is saved) can never drop each other's changes.
+let queue: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 async function readIndex(): Promise<string[]> {
   const raw = await AsyncStorage.getItem(INDEX);
   return raw ? JSON.parse(raw) : [];
@@ -79,26 +88,59 @@ export async function getActivity(id: string): Promise<Activity | null> {
   return raw ? JSON.parse(raw) : null;
 }
 
-export async function saveActivity(a: Activity, opts: { silent?: boolean } = {}): Promise<void> {
-  if (a.lite) throw new Error('Refusing to save a list summary over the full activity');
-  const ids = await readIndex();
-  if (!ids.includes(a.id)) ids.push(a.id);
-  const map = await readSummaries();
-  await AsyncStorage.multiSet([[item(a.id), JSON.stringify(a)], [INDEX, JSON.stringify(ids)]]);
-  await writeSummaries({ ...map, [a.id]: toSummary(a) });
-  if (!opts.silent) emit();
+export function saveActivity(a: Activity, opts: { silent?: boolean } = {}): Promise<void> {
+  if (a.lite) return Promise.reject(new Error('Refusing to save a list summary over the full activity'));
+  return serial(async () => {
+    const ids = await readIndex();
+    if (!ids.includes(a.id)) ids.push(a.id);
+    const map = await readSummaries();
+    await AsyncStorage.multiSet([[item(a.id), JSON.stringify(a)], [INDEX, JSON.stringify(ids)]]);
+    await writeSummaries({ ...map, [a.id]: toSummary(a) });
+    if (!opts.silent) emit();
+  });
 }
 
-export async function deleteActivity(id: string): Promise<Activity | null> {
-  const full = await getActivity(id);
-  const ids = (await readIndex()).filter((x) => x !== id);
-  const map = { ...(await readSummaries()) };
-  delete map[id];
-  await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
-  await AsyncStorage.removeItem(item(id));
-  await writeSummaries(map);
-  emit();
-  return full; // lets the caller offer "Undo"
+/**
+ * Add many activities at once (backup restore). Activities whose id already exists here are left
+ * alone, so a restore never overwrites newer local edits. The index and summaries are written once,
+ * not once per activity. Returns how many were added.
+ */
+export function importActivities(list: Activity[]): Promise<number> {
+  return serial(async () => {
+    const ids = await readIndex();
+    const have = new Set(ids);
+    const fresh: Activity[] = [];
+    for (const a of list) {
+      if (have.has(a.id)) continue;
+      have.add(a.id);
+      fresh.push({ ...a, lite: undefined, efforts: undefined });
+    }
+    if (!fresh.length) return 0;
+    const map = { ...(await readSummaries()) };
+    // a few activities per write keeps each native call (and its memory spike) small
+    for (let i = 0; i < fresh.length; i += 20) {
+      await AsyncStorage.multiSet(fresh.slice(i, i + 20).map((a) => [item(a.id), JSON.stringify(a)] as [string, string]));
+    }
+    for (const a of fresh) { ids.push(a.id); map[a.id] = toSummary(a); }
+    await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
+    await writeSummaries(map);
+    emit();
+    return fresh.length;
+  });
+}
+
+export function deleteActivity(id: string): Promise<Activity | null> {
+  return serial(async () => {
+    const full = await getActivity(id);
+    const ids = (await readIndex()).filter((x) => x !== id);
+    const map = { ...(await readSummaries()) };
+    delete map[id];
+    await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
+    await AsyncStorage.removeItem(item(id));
+    await writeSummaries(map);
+    emit();
+    return full; // lets the caller offer "Undo"
+  });
 }
 
 // ---------- settings ----------
@@ -111,6 +153,14 @@ export async function saveSettings(s: Settings): Promise<void> {
   await AsyncStorage.setItem(SETTINGS, JSON.stringify(s));
   emit();
 }
+/** Merge a change into the latest stored settings (queued, so quick successive changes all stick). */
+export function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  return serial(async () => {
+    const next = { ...(await getSettings()), ...patch };
+    await saveSettings(next);
+    return next;
+  });
+}
 
 // ---------- gear ----------
 const GEAR = 'stride:gear';
@@ -118,9 +168,20 @@ export async function listGear(): Promise<Gear[]> {
   const raw = await AsyncStorage.getItem(GEAR);
   return raw ? JSON.parse(raw) : [];
 }
-export async function saveGearList(list: Gear[]): Promise<void> {
-  await AsyncStorage.setItem(GEAR, JSON.stringify(list));
-  emit();
+export function saveGearList(list: Gear[]): Promise<void> {
+  return serial(async () => {
+    await AsyncStorage.setItem(GEAR, JSON.stringify(list));
+    emit();
+  });
+}
+/** Change the stored gear list in place (reads the latest copy first, so a stale screen can't overwrite it). */
+export function updateGear(fn: (list: Gear[]) => Gear[]): Promise<Gear[]> {
+  return serial(async () => {
+    const next = fn(await listGear());
+    await AsyncStorage.setItem(GEAR, JSON.stringify(next));
+    emit();
+    return next;
+  });
 }
 export async function defaultGear(kind: GearKind): Promise<Gear | undefined> {
   return (await listGear()).find((g) => g.kind === kind && g.isDefault && !g.retired);
@@ -134,4 +195,16 @@ export async function getProfile(): Promise<Profile> {
 export async function saveProfile(p: Profile): Promise<void> {
   await AsyncStorage.setItem(PROFILE, JSON.stringify(p));
   emit();
+}
+/** Merge a change into the latest stored profile (never a stale in-memory copy). */
+export function updateProfile(patch: Partial<Profile>): Promise<Profile> {
+  return serial(async () => {
+    const next = { ...(await getProfile()), ...patch };
+    await saveProfile(next);
+    return next;
+  });
+}
+/** True once a profile has been saved on this phone (a restore then leaves it alone). */
+export async function hasSavedProfile(): Promise<boolean> {
+  return (await AsyncStorage.getItem(PROFILE)) != null;
 }

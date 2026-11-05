@@ -1,4 +1,5 @@
 // Personal records and week-over-week insights (pure, unit-tested).
+import { mondayOf as monday } from './coach';
 import { bestEffort } from './geo';
 import type { Activity } from './types';
 
@@ -40,11 +41,6 @@ export function newRecords(before: Activity[], latest: Activity): PersonalRecord
 }
 
 // ---------- insights ----------
-function monday(t: number) {
-  const x = new Date(t); x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-  return x.getTime();
-}
 
 export type WeekCompare = { thisKm: number; lastKm: number; thisCount: number; lastCount: number; thisSec: number; lastSec: number; changePct: number | null };
 

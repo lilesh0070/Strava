@@ -53,6 +53,7 @@
       "expo-sharing",
       "expo-notifications",
       "./plugins/withReleaseSigning",
+      "./plugins/withAsyncStorageSize",
       "expo-secure-store",
       [
         "expo-splash-screen",

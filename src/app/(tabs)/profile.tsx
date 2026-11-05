@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, Text, TextInput, useWindowDimensions, View, type StyleProp, type TextStyle } from 'react-native';
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
 import CalendarCard from '../../components/CalendarCard';
 import GearCard from '../../components/GearCard';
@@ -10,16 +10,33 @@ import GoalRing from '../../components/GoalRing';
 import { monthKm } from '../../lib/records';
 import Stat from '../../components/Stat';
 import { bestEffort, fmtDuration, fmtKm } from '../../lib/geo';
-import { getProfile, saveProfile, type Profile } from '../../lib/storage';
+import { mondayOf } from '../../lib/coach';
+import { getProfile, onDataChanged, updateProfile, type Profile } from '../../lib/storage';
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
 
-const WEEK = 7 * 24 * 3600 * 1000;
-function mondayOf(t: number) {
-  const x = new Date(t); x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-  return x.getTime();
+/** Monday `k` weeks before `monday`, by calendar date so DST changes don't shift the buckets. */
+function weeksBefore(monday: number, k: number) {
+  const d = new Date(monday); d.setDate(d.getDate() - 7 * k);
+  return d.getTime();
+}
+
+/** Number field that keeps what you type ("72." on the way to "72.5") and saves once it is a whole number. */
+function NumberField({ value, onChange, max = Infinity, label, style }: {
+  value: number | undefined; onChange: (n: number) => void; max?: number; label: string; style: StyleProp<TextStyle>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null); // null → show the stored value
+  return (
+    <TextInput keyboardType="decimal-pad" accessibilityLabel={label} style={style}
+      value={draft ?? (value == null ? '' : String(value))}
+      onChangeText={(t) => {
+        const clean = t.replace(/,/g, '.').replace(/[^0-9.]/g, '');
+        setDraft(clean);
+        if (/^\d+(\.\d+)?$/.test(clean)) onChange(Math.min(max, Number(clean)));
+      }}
+      onEndEditing={() => setDraft(null)} />
+  );
 }
 
 const EFFORTS = [
@@ -35,15 +52,21 @@ export default function ProfileScreen() {
   const { items, loadedAt } = useActivities();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [filter, setFilter] = useState<Sport>('run');
-  useEffect(() => { getProfile().then(setProfile); }, []);
+  // writes still in flight; while typing, don't reload a half-saved copy over the field
+  const pending = useRef(0);
+  useEffect(() => {
+    const load = () => { if (!pending.current) getProfile().then(setProfile); };
+    load();
+    return onDataChanged(load); // e.g. after a restore
+  }, []);
 
   const acts = useMemo(() => (items ?? []).filter((a) => a.sport === filter), [items, filter]);
 
   const weeks = useMemo(() => {
     const thisMon = mondayOf(loadedAt);
     return Array.from({ length: 8 }, (_, i) => {
-      const start = thisMon - (7 - i) * WEEK;
-      const dist = acts.filter((a) => a.startedAt >= start && a.startedAt < start + WEEK).reduce((s, a) => s + a.distanceM, 0);
+      const start = weeksBefore(thisMon, 7 - i), end = weeksBefore(thisMon, 6 - i);
+      const dist = acts.filter((a) => a.startedAt >= start && a.startedAt < end).reduce((s, a) => s + a.distanceM, 0);
       return { start, km: dist / 1000 };
     });
   }, [acts, loadedAt]);
@@ -76,8 +99,9 @@ export default function ProfileScreen() {
 
   const update = (p: Partial<Profile>) => {
     if (!profile) return;
-    const next = { ...profile, ...p };
-    setProfile(next); saveProfile(next);
+    setProfile((cur) => (cur ? { ...cur, ...p } : cur));
+    pending.current++;
+    updateProfile(p).catch(() => undefined).finally(() => { pending.current--; });
   };
 
   return (
@@ -107,8 +131,8 @@ export default function ProfileScreen() {
           <Text style={F.h2}>{new Date().toLocaleDateString(undefined, { month: 'long' })} goal</Text>
           <Text style={{ color: C.muted, fontSize: 12 }}>All sports combined</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TextInput keyboardType="numeric" value={String(profile?.monthlyGoalKm ?? '')} accessibilityLabel="Monthly goal in kilometres"
-              onChangeText={(t) => update({ monthlyGoalKm: Math.max(0, Number(t.replace(/[^0-9.]/g, '')) || 0) })}
+            <NumberField value={profile?.monthlyGoalKm} label="Monthly goal in kilometres"
+              onChange={(monthlyGoalKm) => update({ monthlyGoalKm })}
               style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 12,
                 paddingVertical: 6, minWidth: 64, textAlign: 'center', fontWeight: '700' }} />
             <Text style={{ color: C.muted }}>km</Text>
@@ -152,8 +176,8 @@ export default function ProfileScreen() {
         </Svg>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Text style={{ color: C.muted, flex: 1 }}>Weekly goal (km)</Text>
-          <TextInput keyboardType="numeric" value={String(profile?.weeklyGoalKm ?? '')} accessibilityLabel="Weekly goal in kilometres"
-            onChangeText={(t) => update({ weeklyGoalKm: Math.max(0, Number(t.replace(/[^0-9.]/g, '')) || 0) })}
+          <NumberField value={profile?.weeklyGoalKm} label="Weekly goal in kilometres"
+            onChange={(weeklyGoalKm) => update({ weeklyGoalKm })}
             style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 14,
               paddingVertical: 8, minWidth: 70, textAlign: 'center', fontWeight: '700' }} />
         </View>
@@ -199,8 +223,8 @@ export default function ProfileScreen() {
             <Text style={F.h2}>Body weight</Text>
             <Text style={{ color: C.muted, fontSize: 12 }}>Used only to estimate calories, stays on this phone</Text>
           </View>
-          <TextInput keyboardType="numeric" value={String(profile?.weightKg ?? '')} accessibilityLabel="Body weight in kilograms"
-            onChangeText={(t) => update({ weightKg: Math.min(300, Math.max(0, Number(t.replace(/[^0-9.]/g, '')) || 0)) })}
+          <NumberField value={profile?.weightKg} label="Body weight in kilograms" max={300}
+            onChange={(weightKg) => update({ weightKg })}
             style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 12,
               paddingVertical: 8, minWidth: 64, textAlign: 'center', fontWeight: '700' }} />
           <Text style={{ color: C.muted }}>kg</Text>

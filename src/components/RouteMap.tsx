@@ -1,7 +1,7 @@
 // Interactive map rendered with Leaflet + OpenStreetMap tiles inside a WebView.
 // No API key needed. Route updates are pushed in via injectJavaScript.
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { Linking, View, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView as RNWebView, type WebViewProps } from 'react-native-webview';
 import type { Point } from '../lib/geo';
 import { useTheme, type Palette } from '../lib/theme';
@@ -16,6 +16,8 @@ type Props = {
   follow?: boolean; // live mode: keep the current position centred
   style?: StyleProp<ViewStyle>;
   interactive?: boolean;
+  /** Change this (e.g. a filter value) to re-frame the map around the new routes. */
+  fitKey?: string;
 };
 
 const buildHtml = (C: Palette) => `<!DOCTYPE html><html><head>
@@ -28,9 +30,11 @@ const buildHtml = (C: Palette) => `<!DOCTYPE html><html><head>
 </head><body><div id="m"></div><script>
 var map=L.map('m',{zoomControl:false,attributionControl:true}).setView([20.59,78.96],4);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
-var lines=L.layerGroup().addTo(map), marks=L.layerGroup().addTo(map), me=null, fitted=false;
+map.attributionControl.setPrefix(false);
+var lines=L.layerGroup().addTo(map), marks=L.layerGroup().addTo(map), me=null, fitted=false, fitKey=null;
 function dot(ll,c,r){return L.circleMarker(ll,{radius:r||6,color:'#fff',weight:2,fillColor:c,fillOpacity:1});}
 window.update=function(d){
+  if(d.fitKey!==fitKey){ fitKey=d.fitKey; fitted=false; }
   lines.clearLayers();marks.clearLayers();
   var all=[];
   d.segs.forEach(function(s){ if(s.length>1){ L.polyline(s,{color:'${C.route}',weight:5,opacity:.95}).addTo(lines);} all=all.concat(s); });
@@ -42,7 +46,7 @@ window.update=function(d){
 };
 </script></body></html>`;
 
-export default function RouteMap({ segments, current, follow = false, style, interactive = true }: Props) {
+export default function RouteMap({ segments, current, follow = false, style, interactive = true, fitKey }: Props) {
   const { C } = useTheme();
   const ref = useRef<WebViewHandle>(null);
   const html = useMemo(() => buildHtml(C), [C]);
@@ -52,8 +56,9 @@ export default function RouteMap({ segments, current, follow = false, style, int
         segs: segments.map((s) => s.map((p) => [+p.lat.toFixed(6), +p.lng.toFixed(6)])),
         cur: current ? [current.lat, current.lng] : null,
         follow,
+        fitKey: fitKey ?? null,
       }),
-    [segments, current, follow],
+    [segments, current, follow, fitKey],
   );
   const latest = useRef(payload);
 
@@ -69,6 +74,12 @@ export default function RouteMap({ segments, current, follow = false, style, int
         ref={ref}
         originWhitelist={['*']}
         source={{ html, baseUrl: 'https://localhost/' }}
+        // links (e.g. the OSM attribution) open in the browser instead of replacing the map
+        onShouldStartLoadWithRequest={(req) => {
+          if (req.url.startsWith('https://localhost') || req.url.startsWith('about:') || req.url.startsWith('data:')) return true;
+          Linking.openURL(req.url).catch(() => undefined);
+          return false;
+        }}
         onLoadEnd={() => ref.current?.injectJavaScript(`window.update(${latest.current});true;`)}
         style={{ backgroundColor: C.bg }}
         scrollEnabled={false}

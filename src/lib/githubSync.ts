@@ -11,10 +11,15 @@ const META_KEY = 'stride:github-sync';
 const FILE = 'stride-backup.json';
 const API = 'https://api.github.com';
 
-export type SyncMeta = { gistId?: string; login?: string; lastSyncAt?: number; lastError?: string | null; auto: boolean };
+export type SyncMeta = {
+  gistId?: string; login?: string; lastSyncAt?: number; lastError?: string | null; auto: boolean;
+  /** Connected to a backup that already existed: merge it in before the first upload, so this phone can't replace it. */
+  needsPull?: boolean;
+};
 
 let meta: SyncMeta = { auto: true };
 let busy = false;
+let pushAgain = false; // an upload was asked for while one was running
 let loaded = false;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
@@ -61,15 +66,34 @@ export async function connect(token: string): Promise<void> {
   if (!token) throw new Error('Paste a token first.');
   await loadSyncMeta();
   const user = await gh('/user', token);
-  const gists: { id: string; files: Record<string, unknown> }[] = await gh('/gists?per_page=100', token);
-  const existing = gists.find((g) => g.files && FILE in g.files);
+  // look through every page of gists (100 per page) for an existing Stride backup
+  let existing: { id: string } | undefined;
+  for (let page = 1; page <= 30 && !existing; page++) {
+    const gists: { id: string; files: Record<string, unknown> }[] = await gh(`/gists?per_page=100&page=${page}`, token);
+    existing = gists.find((g) => g.files && FILE in g.files);
+    if (gists.length < 100) break;
+  }
   await SecureStore.setItemAsync(TOKEN_KEY, token);
-  await set({ login: user.login, gistId: existing?.id, lastError: null });
+  await set({ login: user.login, gistId: existing?.id, needsPull: !!existing, lastError: null });
+}
+
+/** The backup JSON stored in the gist, or null if the gist is gone. */
+async function downloadBackup(token: string, gistId: string): Promise<string | null> {
+  let gist: { files?: Record<string, { truncated?: boolean; raw_url: string; content: string }> };
+  try { gist = await gh(`/gists/${gistId}`, token); }
+  catch (e) { if (String((e as Error).message).includes('404')) return null; throw e; }
+  const f = gist.files?.[FILE];
+  if (!f) throw new Error('The backup gist has no Stride file.');
+  if (!f.truncated) return f.content;
+  // large files are truncated in the API response; fetch the raw file instead
+  const res = await fetch(f.raw_url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Could not download the backup from GitHub (error ${res.status}).`);
+  return res.text();
 }
 
 export async function disconnect() {
   await SecureStore.deleteItemAsync(TOKEN_KEY);
-  await set({ login: undefined, gistId: undefined, lastSyncAt: undefined, lastError: null });
+  await set({ login: undefined, gistId: undefined, lastSyncAt: undefined, lastError: null, needsPull: false });
 }
 
 export const setAutoSync = (auto: boolean) => set({ auto });
@@ -79,9 +103,15 @@ export async function pushToGithub(): Promise<number> {
   await loadSyncMeta();
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
   if (!token) throw new Error('Connect GitHub first.');
-  if (busy) return 0;
+  if (busy) { pushAgain = true; return 0; } // uploaded as soon as the running sync finishes
   setBusy(true);
   try {
+    if (meta.needsPull && meta.gistId) {
+      // first upload from this phone: keep what is already in the cloud by merging it in first
+      const remote = await downloadBackup(token, meta.gistId);
+      if (remote) await applyBackup(remote, { includeSettings: false });
+      await set({ needsPull: false });
+    }
     const { json, count } = await buildBackup();
     const body = JSON.stringify({ description: 'Stride activity backup (private)', files: { [FILE]: { content: json } } });
     let gistId = meta.gistId;
@@ -103,6 +133,7 @@ export async function pushToGithub(): Promise<number> {
     throw e;
   } finally {
     setBusy(false);
+    if (pushAgain) { pushAgain = false; pushToGithub().catch(() => undefined); }
   }
 }
 
@@ -112,18 +143,20 @@ export async function pullFromGithub(): Promise<number> {
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
   if (!token) throw new Error('Connect GitHub first.');
   if (!meta.gistId) throw new Error('No Stride backup found on this GitHub account yet.');
+  if (busy) throw new Error('A GitHub sync is already running. Try again in a moment.');
   setBusy(true);
   try {
-    const gist = await gh(`/gists/${meta.gistId}`, token);
-    const f = gist.files?.[FILE];
-    if (!f) throw new Error('The backup gist has no Stride file.');
-    // large files are truncated in the API response; fetch the raw file instead
-    const text: string = f.truncated ? await (await fetch(f.raw_url, { headers: { Authorization: `Bearer ${token}` } })).text() : f.content;
+    const text = await downloadBackup(token, meta.gistId);
+    if (text == null) throw new Error('The backup gist was deleted on GitHub.');
     const n = await applyBackup(text, { includeSettings: false });
-    await set({ lastSyncAt: Date.now(), lastError: null });
+    await set({ lastSyncAt: Date.now(), lastError: null, needsPull: false });
     return n;
+  } catch (e) {
+    await set({ lastError: (e as Error).message });
+    throw e;
   } finally {
     setBusy(false);
+    if (pushAgain) { pushAgain = false; pushToGithub().catch(() => undefined); }
   }
 }
 

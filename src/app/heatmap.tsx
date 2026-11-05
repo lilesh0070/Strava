@@ -30,7 +30,7 @@ export default function Heatmap() {
         {SPORTS.map((s) => <NeuButton key={s.key} small label={s.label} selected={sport === s.key} onPress={() => setSport(s.key)} />)}
       </View>
       <View style={{ flex: 1, borderRadius: 30, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-        {segs.length ? <RouteMap segments={segs} style={{ flex: 1, borderRadius: 24 }} />
+        {segs.length ? <RouteMap segments={segs} fitKey={sport} style={{ flex: 1, borderRadius: 24 }} />
           : <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40 }}>No GPS routes yet.</Text>}
       </View>
     </View>

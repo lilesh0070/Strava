@@ -16,6 +16,7 @@ const en = {
   'rec.weakTitle': 'GPS signal is weak', 'rec.noGpsTitle': 'No GPS signal yet',
   'rec.weakBody': 'Your route may be inaccurate for the first minute. Waiting a few seconds in open sky usually fixes it.',
   'rec.wait': 'Wait', 'rec.anyway': 'Start anyway', 'rec.nice': 'Nice work!',
+  'rec.saveFailed': 'Could not save', 'rec.saveFailedBody': 'Your recording is safe. Tap the finish flag to try again.',
   'set.updates': 'App updates', 'set.appearance': 'Appearance', 'set.language': 'Language', 'set.recording': 'Recording',
   'set.motivation': 'Motivation', 'set.data': 'Your data', 'set.about': 'About',
   'set.voice': 'Voice updates', 'set.voiceSub': 'Time and pace every kilometre',
@@ -47,6 +48,7 @@ const hi: Partial<Record<Key, string>> = {
   'rec.weakTitle': 'GPS सिग्नल कमज़ोर है', 'rec.noGpsTitle': 'अभी GPS सिग्नल नहीं',
   'rec.weakBody': 'पहले एक मिनट रास्ता थोड़ा ग़लत हो सकता है। खुले आसमान में कुछ सेकंड रुकने से आमतौर पर ठीक हो जाता है।',
   'rec.wait': 'रुकें', 'rec.anyway': 'फिर भी शुरू करें', 'rec.nice': 'शाबाश!',
+  'rec.saveFailed': 'सेव नहीं हो पाया', 'rec.saveFailedBody': 'आपकी रिकॉर्डिंग सुरक्षित है। फिर से कोशिश करने के लिए फ़िनिश फ़्लैग दबाएँ।',
   'set.updates': 'ऐप अपडेट', 'set.appearance': 'दिखावट', 'set.language': 'भाषा', 'set.recording': 'रिकॉर्डिंग',
   'set.motivation': 'प्रेरणा', 'set.data': 'आपका डेटा', 'set.about': 'जानकारी',
   'set.voice': 'आवाज़ में अपडेट', 'set.voiceSub': 'हर किलोमीटर पर समय और पेस',
@@ -87,7 +89,7 @@ export function kmCueHi(km: number, movingSec: number, usesPace: boolean) {
 
 export const voicePhrases = {
   en: { paused: 'Auto paused', resumed: 'Resumed', faster: 'Pick up the pace', slower: 'Ease off a little, you are ahead of target',
-    lap: (no: number, km: string, sec: number) => `Lap ${no}. ${km} kilometres in ${n(Math.floor(sec / 60), 'minute', 'minutes')} ${n(Math.round(sec % 60), 'second', 'seconds')}.` },
+    lap: (no: number, km: string, sec: number) => { const s = Math.round(sec); return `Lap ${no}. ${km} kilometres in ${n(Math.floor(s / 60), 'minute', 'minutes')} ${n(s % 60, 'second', 'seconds')}.`; } },
   hi: { paused: 'ऑटो पॉज़', resumed: 'फिर से शुरू', faster: 'थोड़ा तेज़ चलिए', slower: 'थोड़ा धीमे, आप टारगेट से आगे हैं',
     lap: (no: number, km: string, sec: number) => `लैप ${no}। ${km} किलोमीटर, ${spokenDurationHi(sec)} में।` },
 };

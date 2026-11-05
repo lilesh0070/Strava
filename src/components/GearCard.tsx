@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { fmtKm } from '../lib/geo';
-import { listGear, saveGearList } from '../lib/storage';
+import { listGear, onDataChanged, updateGear } from '../lib/storage';
 import { useTheme } from '../lib/theme';
 import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress } from './Neu';
 import { DEFAULT_SHOE_LIMIT_KM, type Activity, type Gear, type GearKind } from '../lib/types';
@@ -11,22 +11,28 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
   const [gear, setGear] = useState<Gear[]>([]);
   const [draft, setDraft] = useState('');
   const [kind, setKind] = useState<GearKind>('shoes');
-  useEffect(() => { listGear().then(setGear); }, []);
+  useEffect(() => {
+    const load = () => { listGear().then(setGear); };
+    load();
+    return onDataChanged(load); // e.g. gear added by a restore
+  }, []);
 
-  const save = (next: Gear[]) => { setGear(next); saveGearList(next); };
+  // always change the latest stored list, so a restore that happened meanwhile is never overwritten
+  const save = (fn: (list: Gear[]) => Gear[]) => { updateGear(fn).then(setGear).catch(() => undefined); };
 
   const add = () => {
     const name = draft.trim();
     if (!name) return;
-    const first = !gear.some((g) => g.kind === kind && !g.retired);
-    save([...gear, { id: Date.now().toString(36), name, kind, isDefault: first, limitKm: kind === 'shoes' ? DEFAULT_SHOE_LIMIT_KM : undefined }]);
+    const id = Date.now().toString(36);
+    save((list) => [...list, { id, name, kind, isDefault: !list.some((g) => g.kind === kind && !g.retired),
+      limitKm: kind === 'shoes' ? DEFAULT_SHOE_LIMIT_KM : undefined }]);
     setDraft('');
   };
 
   const menu = (g: Gear) => Alert.alert(g.name, undefined, [
-    { text: 'Make default', onPress: () => save(gear.map((x) => (x.kind === g.kind ? { ...x, isDefault: x.id === g.id } : x))) },
-    { text: g.retired ? 'Un-retire' : 'Retire', onPress: () => save(gear.map((x) => (x.id === g.id ? { ...x, retired: !x.retired, isDefault: false } : x))) },
-    { text: 'Delete', style: 'destructive', onPress: () => save(gear.filter((x) => x.id !== g.id)) },
+    { text: 'Make default', onPress: () => save((list) => list.map((x) => (x.kind === g.kind ? { ...x, isDefault: x.id === g.id } : x))) },
+    { text: g.retired ? 'Un-retire' : 'Retire', onPress: () => save((list) => list.map((x) => (x.id === g.id ? { ...x, retired: !x.retired, isDefault: false } : x))) },
+    { text: 'Delete', style: 'destructive', onPress: () => save((list) => list.filter((x) => x.id !== g.id)) },
     { text: 'Cancel', style: 'cancel' },
   ]);
 

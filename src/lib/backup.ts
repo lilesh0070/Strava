@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { getProfile, getSettings, listFullActivities, notifyDataChanged, listGear, saveActivity, saveGearList, saveProfile, saveSettings } from './storage';
+import { getSettings, hasSavedProfile, importActivities, listFullActivities, listGear, getProfile, saveProfile, saveSettings, updateGear } from './storage';
 import type { Activity } from './types';
 
 const FORMAT = 'stride-backup';
@@ -16,30 +16,42 @@ export async function buildBackup(): Promise<{ json: string; count: number }> {
   return { json, count: activities.length };
 }
 
-/** Merge a backup into local data (by id; nothing is deleted). Returns the number of activities it contained. */
-export async function applyBackup(text: string, opts: { includeSettings?: boolean } = {}): Promise<number> {
-  let data: { format?: string; activities?: Activity[]; gear?: unknown[]; profile?: object; settings?: object };
-  try { data = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
-  if (data.format !== FORMAT || !Array.isArray(data.activities)) throw new Error('That file is not a Stride backup.');
+export type BackupData = { format?: string; activities?: Activity[]; gear?: unknown[]; profile?: object; settings?: object };
 
-  const valid = data.activities.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && typeof a.startedAt === 'number');
-  for (const a of valid) await saveActivity({ ...a, lite: undefined, efforts: undefined }, { silent: true });
+/** Parse and sanity-check a backup document. */
+export function parseBackup(text: string): BackupData & { activities: Activity[] } {
+  let data: BackupData;
+  try { data = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
+  if (!data || data.format !== FORMAT || !Array.isArray(data.activities)) throw new Error('That file is not a Stride backup.');
+  const activities = data.activities.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && typeof a.startedAt === 'number');
+  return { ...data, activities };
+}
+
+/**
+ * Merge a backup into local data. Nothing is deleted and nothing local is overwritten: activities and
+ * gear are added by id, and the profile is only taken when this phone has none yet. Returns the number
+ * of activities added.
+ */
+export async function applyBackup(text: string, opts: { includeSettings?: boolean } = {}): Promise<number> {
+  const data = parseBackup(text);
+  const added = await importActivities(data.activities);
   if (Array.isArray(data.gear)) {
-    const existing = await listGear();
-    const ids = new Set(existing.map((g) => g.id));
-    await saveGearList([...existing, ...(data.gear as typeof existing).filter((g) => g && !ids.has(g.id))]);
+    const incoming = (data.gear as Awaited<ReturnType<typeof listGear>>).filter((g) => g && typeof g.id === 'string');
+    await updateGear((existing) => {
+      const ids = new Set(existing.map((g) => g.id));
+      return [...existing, ...incoming.filter((g) => !ids.has(g.id))];
+    });
   }
-  notifyDataChanged();
-  if (data.profile) await saveProfile({ ...(await getProfile()), ...data.profile });
+  if (data.profile && !(await hasSavedProfile())) await saveProfile({ ...(await getProfile()), ...data.profile });
   if (data.settings && opts.includeSettings !== false) await saveSettings({ ...(await getSettings()), ...data.settings });
-  return valid.length;
+  return added;
 }
 
 export async function exportBackup(): Promise<number> {
   const { json, count } = await buildBackup();
   const file = new File(Paths.cache, `stride-backup-${new Date().toISOString().slice(0, 10)}.json`);
   file.create({ overwrite: true });
-  file.write(json);
+  await file.write(json); // async in SDK 58: share only once the file is complete
   await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save Stride backup' });
   return count;
 }

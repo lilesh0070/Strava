@@ -75,11 +75,24 @@ export type Session = {
   lastPaceAlertAt?: number;
   maxSpeedMs?: number;
   workout?: WorkoutProgress | null;
+  /** When the current segment began (start or last resume): idle time is never measured from before it. */
+  segStartedAt?: number;
+  /** Total time spent auto-paused (standing still), which interval workouts still count. */
+  autoPausedMs?: number;
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {
   const paused = s.pausedMs + (s.pauseStartedAt ? now - s.pauseStartedAt : 0);
   return Math.max(0, (now - s.startedAt - paused) / 1000);
+}
+
+/**
+ * Clock for interval workouts: moving time plus time auto-paused, so a standing rest still counts down.
+ * Only a manual pause stops it.
+ */
+export function workoutSec(s: Session, now = Date.now()): number {
+  const auto = (s.autoPausedMs ?? 0) + (s.autoPaused && s.pauseStartedAt ? Math.max(0, now - s.pauseStartedAt) : 0);
+  return sessionMovingSec(s, now) + auto / 1000;
 }
 
 /** Unique activity id: start time in base 36 plus a short random tail (`tag` marks e.g. manual entries). */

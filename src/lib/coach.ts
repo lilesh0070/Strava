@@ -54,13 +54,32 @@ ${segs}
 `;
 }
 
+/**
+ * Local midnight starting the Monday of t's week. Built from calendar fields so a DST change (even one
+ * at midnight) can't give two different keys for the same week.
+ */
+export function mondayOf(t: number): number {
+  const x = new Date(t);
+  return new Date(x.getFullYear(), x.getMonth(), x.getDate() - ((x.getDay() + 6) % 7)).getTime();
+}
+const monday = mondayOf;
+
+/** Longest run of consecutive active weeks ever, and the first activity that took a run to `target` weeks. */
+export function longestWeekStreak(startTimes: number[], target = Infinity): { best: number; reachedAt?: number } {
+  let best = 0, run = 0, prev: number | null = null, reachedAt: number | undefined;
+  for (const t of [...startTimes].sort((a, b) => a - b)) {
+    const w = monday(t);
+    if (w === prev) continue;
+    run = prev != null && w === monday(prev + 10 * 86400000) ? run + 1 : 1; // +10 days lands in the next week
+    prev = w;
+    best = Math.max(best, run);
+    if (reachedAt == null && run >= target) reachedAt = t;
+  }
+  return { best, reachedAt };
+}
+
 /** Number of consecutive weeks (ending this week or last week) with at least one activity. */
 export function weekStreak(startTimes: number[], now = Date.now()): number {
-  const monday = (t: number) => {
-    const x = new Date(t); x.setHours(0, 0, 0, 0);
-    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-    return x.getTime();
-  };
   const weeks = new Set(startTimes.map(monday));
   let w = monday(now);
   if (!weeks.has(w)) w = monday(w - 3 * 86400000); // current week not done yet: start from last week

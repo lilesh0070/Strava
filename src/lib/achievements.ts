@@ -1,5 +1,5 @@
 // Badges computed from activity history (nothing stored, so they can never get out of sync).
-import { weekStreak } from './coach';
+import { longestWeekStreak } from './coach';
 import type { Activity } from './types';
 
 export type Achievement = {
@@ -15,6 +15,8 @@ export type Achievement = {
 type Rule = { id: string; title: string; detail: string; icon: string; target: number; measure: (acts: Activity[]) => { value: number; at?: number } };
 
 const runs = (a: Activity[]) => a.filter((x) => x.sport === 'run');
+/** When the earliest of these activities started (lists arrive newest first). */
+const firstAt = (a: Activity[]) => (a.length ? Math.min(...a.map((x) => x.startedAt)) : undefined);
 const longestBy = (acts: Activity[], km: number) => {
   const hit = [...acts].sort((x, y) => x.startedAt - y.startedAt).find((x) => x.distanceM >= km * 1000);
   return { value: Math.max(0, ...acts.map((x) => x.distanceM / 1000)), at: hit?.startedAt };
@@ -37,11 +39,12 @@ const RULES: Rule[] = [
   { id: 'century', title: 'Century ride', detail: 'Ride 100 km in one go', icon: 'bike-fast', target: 100,
     measure: (a) => longestBy(a.filter((x) => x.sport === 'ride'), 100) },
   { id: 'early', title: 'Early bird', detail: 'Start an activity before 6 am', icon: 'weather-sunset-up', target: 1,
-    measure: (a) => { const e = a.filter((x) => new Date(x.startedAt).getHours() < 6); return { value: e.length, at: e[0]?.startedAt }; } },
+    measure: (a) => { const e = a.filter((x) => new Date(x.startedAt).getHours() < 6); return { value: e.length, at: firstAt(e) }; } },
   { id: 'climber', title: 'Climber', detail: '500 m of climbing in one activity', icon: 'image-filter-hdr', target: 500,
-    measure: (a) => ({ value: Math.max(0, ...a.map((x) => x.elevGainM)), at: a.find((x) => x.elevGainM >= 500)?.startedAt }) },
+    measure: (a) => ({ value: Math.max(0, ...a.map((x) => x.elevGainM)), at: firstAt(a.filter((x) => x.elevGainM >= 500)) }) },
   { id: 'streak4', title: 'On a roll', detail: 'Be active 4 weeks in a row', icon: 'fire', target: 4,
-    measure: (a) => ({ value: weekStreak(a.map((x) => x.startedAt)) }) },
+    // the longest streak ever, so a later break never takes the badge away again
+    measure: (a) => { const s = longestWeekStreak(a.map((x) => x.startedAt), 4); return { value: s.best, at: s.reachedAt }; } },
   { id: '100km', title: '100 km total', detail: 'Cover 100 km across all activities', icon: 'map-marker-distance', target: 100, measure: (a) => totalKm(a, 100) },
   { id: '500km', title: '500 km total', detail: 'Cover 500 km across all activities', icon: 'earth', target: 500, measure: (a) => totalKm(a, 500) },
   { id: 'ten', title: 'Regular', detail: 'Log 10 activities', icon: 'calendar-check-outline', target: 10,
