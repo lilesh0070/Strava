@@ -15,6 +15,7 @@ const LEGACY_SUMMARIES = 'stride:summaries'; // one blob for all summaries (v1.2
 export const EFFORT_DISTANCES = [1000, 5000, 10000, 21097.5];
 
 export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number };
+export const DEFAULT_PROFILE: Profile = { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80 };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -60,15 +61,18 @@ async function multiSetChunked(pairs: [string, string][]) {
  * Read many keys, a few at a time. If a chunk fails (e.g. one value is too big to read on Android),
  * its keys are read one by one and only the unreadable ones are skipped, so one bad row can't hide all.
  */
-async function readMany<T>(keys: string[]): Promise<Map<string, T>> {
+async function readMany<T>(keys: string[], unreadable?: string[]): Promise<Map<string, T>> {
   const out = new Map<string, T>();
-  const take = (k: string, v: string | null) => { if (v) { try { out.set(k, JSON.parse(v) as T); } catch { /* corrupt row */ } } };
+  const take = (k: string, v: string | null) => {
+    if (!v) return;
+    try { out.set(k, JSON.parse(v) as T); } catch { unreadable?.push(k); } // corrupt row
+  };
   for (let i = 0; i < keys.length; i += CHUNK) {
     const part = keys.slice(i, i + CHUNK);
     try {
       for (const [k, v] of await AsyncStorage.multiGet(part)) take(k, v);
     } catch {
-      for (const k of part) { try { take(k, await AsyncStorage.getItem(k)); } catch { /* unreadable */ } }
+      for (const k of part) { try { take(k, await AsyncStorage.getItem(k)); } catch { unreadable?.push(k); } }
     }
   }
   return out;
@@ -93,7 +97,8 @@ async function readSummaries(ids: string[]): Promise<Record<string, Activity>> {
   await migrateLegacySummaries();
   const map = (summaryCache ??= {});
   const missing = ids.filter((id) => !map[id]);
-  if (missing.length) for (const s of (await readMany<Activity>(missing.map(summaryKey))).values()) map[s.id] = s;
+  // ??= : a save that finished during this read already put the newer summary in the cache
+  if (missing.length) for (const s of (await readMany<Activity>(missing.map(summaryKey))).values()) map[s.id] ??= s;
   return map;
 }
 
@@ -119,11 +124,16 @@ export async function listActivities(): Promise<Activity[]> {
   return ids.map((id) => map[id]).filter((a): a is Activity => !!a).sort((a, b) => b.startedAt - a.startedAt);
 }
 
-/** Full activities with every GPS point (backups only: this is slow with a big history). */
-export async function listFullActivities(): Promise<Activity[]> {
+/**
+ * Full activities with every GPS point (backups only: this is slow with a big history), plus the ids
+ * of any that could not be read back, so a backup can say so instead of silently leaving them out.
+ */
+export async function listFullActivities(): Promise<{ activities: Activity[]; unreadable: string[] }> {
   const ids = await readIndex();
-  if (!ids.length) return [];
-  return [...(await readMany<Activity>(ids.map(item))).values()];
+  if (!ids.length) return { activities: [], unreadable: [] };
+  const bad: string[] = [];
+  const activities = [...(await readMany<Activity>(ids.map(item), bad)).values()];
+  return { activities, unreadable: bad.map((k) => k.slice(item('').length)) };
 }
 
 export async function getActivity(id: string): Promise<Activity | null> {
@@ -238,7 +248,7 @@ export async function defaultGear(kind: GearKind): Promise<Gear | undefined> {
 
 export async function getProfile(): Promise<Profile> {
   const raw = await AsyncStorage.getItem(PROFILE);
-  return { name: 'Athlete', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80, ...(raw ? JSON.parse(raw) : {}) };
+  return { ...DEFAULT_PROFILE, ...(raw ? JSON.parse(raw) : {}) };
 }
 
 export async function saveProfile(p: Profile): Promise<void> {
@@ -253,7 +263,4 @@ export function updateProfile(patch: Partial<Profile>): Promise<Profile> {
     return next;
   });
 }
-/** True once a profile has been saved on this phone (a restore then leaves it alone). */
-export async function hasSavedProfile(): Promise<boolean> {
-  return (await AsyncStorage.getItem(PROFILE)) != null;
-}
+

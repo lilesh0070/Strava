@@ -4,16 +4,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { getSettings, hasSavedProfile, importActivities, listFullActivities, listGear, getProfile, saveProfile, saveSettings, updateGear } from './storage';
+import { DEFAULT_PROFILE, getSettings, importActivities, listFullActivities, listGear, getProfile, saveProfile, saveSettings, updateGear, type Profile } from './storage';
 import type { Activity } from './types';
 
 const FORMAT = 'stride-backup';
 const VERSION = 1;
 
-export async function buildBackup(): Promise<{ json: string; count: number }> {
-  const [activities, gear, profile, settings] = await Promise.all([listFullActivities(), listGear(), getProfile(), getSettings()]);
-  const json = JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), activities, gear, profile, settings });
-  return { json, count: activities.length };
+/** The backup document. `unreadable` lists activity ids that couldn't be read back and are not in it. */
+export async function buildBackup(extra: Activity[] = []): Promise<{ json: string; count: number; unreadable: string[] }> {
+  const [{ activities, unreadable }, gear, profile, settings] = await Promise.all([listFullActivities(), listGear(), getProfile(), getSettings()]);
+  const all = [...activities, ...extra];
+  const json = JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), activities: all, gear, profile, settings });
+  return { json, count: all.length, unreadable };
 }
 
 export type BackupData = { format?: string; activities?: Activity[]; gear?: unknown[]; profile?: object; settings?: object };
@@ -29,8 +31,8 @@ export function parseBackup(text: string): BackupData & { activities: Activity[]
 
 /**
  * Merge a backup into local data. Nothing is deleted and nothing local is overwritten: activities and
- * gear are added by id, and the profile is only taken when this phone has none yet. Returns the number
- * of activities added.
+ * gear are added by id, and profile fields are only taken where this phone still has the default (so a
+ * name typed during onboarding stays, but goals and weight come back). Returns the number added.
  */
 export async function applyBackup(text: string, opts: { includeSettings?: boolean } = {}): Promise<number> {
   const data = parseBackup(text);
@@ -42,18 +44,32 @@ export async function applyBackup(text: string, opts: { includeSettings?: boolea
       return [...existing, ...incoming.filter((g) => !ids.has(g.id))];
     });
   }
-  if (data.profile && !(await hasSavedProfile())) await saveProfile({ ...(await getProfile()), ...data.profile });
+  if (data.profile && typeof data.profile === 'object') {
+    const local = await getProfile();
+    const incoming = data.profile as Partial<Profile>;
+    const merged: Profile = { ...local };
+    let changed = false;
+    for (const k of Object.keys(DEFAULT_PROFILE) as (keyof Profile)[]) {
+      const v = incoming[k];
+      if (v != null && typeof v === typeof DEFAULT_PROFILE[k] && local[k] === DEFAULT_PROFILE[k] && v !== local[k]) {
+        (merged as Record<keyof Profile, unknown>)[k] = v;
+        changed = true;
+      }
+    }
+    if (changed) await saveProfile(merged);
+  }
   if (data.settings && opts.includeSettings !== false) await saveSettings({ ...(await getSettings()), ...data.settings });
   return added;
 }
 
-export async function exportBackup(): Promise<number> {
-  const { json, count } = await buildBackup();
+/** Share a backup file. Returns how many activities it holds and how many couldn't be read. */
+export async function exportBackup(): Promise<{ count: number; unreadable: number }> {
+  const { json, count, unreadable } = await buildBackup();
   const file = new File(Paths.cache, `stride-backup-${new Date().toISOString().slice(0, 10)}.json`);
   file.create({ overwrite: true });
   await file.write(json); // async in SDK 58: share only once the file is complete
   await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save Stride backup' });
-  return count;
+  return { count, unreadable: unreadable.length };
 }
 
 /** Returns the number of activities imported, or null if the user cancelled. */

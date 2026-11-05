@@ -63,22 +63,59 @@ export function subscribe(fn: () => void) {
 export const getSession = () => session;
 export const getLastFix = () => lastFix;
 
+// The session's points are stored in chunks, not inside one value: Android can't read back a value
+// over 2 MB (about 8 hours of 1 Hz GPS). Points are only ever appended, so a save rewrites just the
+// session info and the last chunk instead of the whole track.
+const chunkKey = (i: number) => `${SESSION_KEY}:pts:${i}`;
+const POINTS_PER_CHUNK = 4000; // ~300 KB
+let persistedPoints = 0; // points already safely in full chunks + the last chunk
+let storedChunks = 0;
+let keepUnreadable = false; // a stored session we couldn't read: leave it until a new one replaces it
+
 async function load() {
   if (loaded) return;
   try {
     const raw = await AsyncStorage.getItem(SESSION_KEY);
-    session = raw ? JSON.parse(raw) : null;
+    const stored = raw ? JSON.parse(raw) : null;
+    if (stored && Array.isArray(stored.segLens)) {
+      const { segLens, chunks, ...rest } = stored as Omit<Session, 'segments'> & { segLens: number[]; chunks: number };
+      const rows = await AsyncStorage.multiGet(Array.from({ length: chunks }, (_, i) => chunkKey(i)));
+      const flat: Point[] = rows.flatMap(([, v]) => (v ? (JSON.parse(v) as Point[]) : []));
+      let o = 0;
+      const segments = segLens.map((n) => { const seg = flat.slice(o, o + n); o += n; return seg; });
+      session = { ...rest, segments };
+      persistedPoints = flat.length;
+      storedChunks = chunks;
+    } else {
+      session = stored; // saved by v1.2: points inline
+    }
   } catch {
-    // unreadable (e.g. corrupt, or a huge session over Android's 2 MB read limit): start clean rather
-    // than failing every later start/ingest
+    // unreadable (corrupt, or a huge v1.2 session over the read limit): don't fail every later
+    // start/ingest, and don't delete it either
     session = null;
+    keepUnreadable = true;
   }
   loaded = true;
 }
 async function persist() {
   lastPersistAt = Date.now();
-  if (session) await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else await AsyncStorage.removeItem(SESSION_KEY);
+  if (session) {
+    const { segments, ...info } = session;
+    const flat = segments.flat();
+    const n = Math.ceil(flat.length / POINTS_PER_CHUNK);
+    const firstDirty = Math.floor(Math.min(persistedPoints, flat.length) / POINTS_PER_CHUNK);
+    const pairs: [string, string][] = [[SESSION_KEY, JSON.stringify({ ...info, segLens: segments.map((g) => g.length), chunks: n })]];
+    for (let i = firstDirty; i < n; i++) pairs.push([chunkKey(i), JSON.stringify(flat.slice(i * POINTS_PER_CHUNK, (i + 1) * POINTS_PER_CHUNK))]);
+    await AsyncStorage.multiSet(pairs); // info and chunks together, so they always agree
+    if (storedChunks > n) await AsyncStorage.multiRemove(Array.from({ length: storedChunks - n }, (_, i) => chunkKey(n + i)));
+    persistedPoints = flat.length;
+    storedChunks = n;
+    keepUnreadable = false;
+  } else if (!keepUnreadable) {
+    await AsyncStorage.multiRemove([SESSION_KEY, ...Array.from({ length: storedChunks }, (_, i) => chunkKey(i))]);
+    persistedPoints = 0;
+    storedChunks = 0;
+  }
 }
 /** Writing the whole session every second is the biggest CPU/battery cost after GPS; throttle it. */
 async function persistSoon() {
@@ -345,8 +382,9 @@ export async function start(sport: Sport, workoutId?: string | null) {
       const now = Date.now();
       // seed with the warm-up fix only if it is fresh; an old last-known position would add a phantom jump
       const seed = lastFix && (lastFix.acc ?? 99) <= 35 && now - lastFix.t < 10_000 ? [{ ...lastFix, t: now }] : [];
+      persistedPoints = 0; // a new track: every chunk gets written fresh
       session = {
-        sport, startedAt: now, status: 'recording', segStartedAt: now,
+        sport, startedAt: now, status: 'recording', segStartedAt: now, activityId: newActivityId(now),
         pausedMs: 0, pauseStartedAt: null, distanceM: 0, lastCueKm: 0,
         workout: findWorkout(workoutId) ? startProgress(workoutId!, 0, 0) : null,
         segments: [seed],
@@ -429,7 +467,7 @@ async function saveSession(gearId: string | undefined): Promise<Activity | null>
   const movingSec = Math.round(sessionMovingSec(s, now));
   const distanceM = totalDistance(segments);
   const a: Activity = {
-    id: newActivityId(s.startedAt),
+    id: (s.activityId ??= newActivityId(s.startedAt)), // stable across retries
     name: defaultName(s.sport, s.startedAt),
     sport: s.sport,
     startedAt: s.startedAt,

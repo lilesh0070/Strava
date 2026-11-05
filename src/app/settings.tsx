@@ -204,7 +204,11 @@ export default function SettingsScreen() {
       <Section title={t('set.data')}>
         <GithubSyncCard />
         <NeuTile icon="cloud-upload-outline" title="Back up" subtitle="Save all activities, gear and settings to a file"
-          onPress={() => exportBackup().catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
+          onPress={() => exportBackup()
+            .then(({ unreadable }) => {
+              if (unreadable) Alert.alert('Some activities left out', `${unreadable} activit${unreadable === 1 ? 'y' : 'ies'} could not be read on this phone and ${unreadable === 1 ? 'is' : 'are'} not in the file.`);
+            })
+            .catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
         <NeuTile icon="cloud-download-outline" title="Restore" subtitle="Import a Stride backup file (merges, nothing is deleted)"
           onPress={async () => {
             try {
@@ -213,7 +217,9 @@ export default function SettingsScreen() {
               // the backup may have changed settings: show them, apply them, and schedule its reminder
               const next = await loadSettings();
               refreshSettings();
-              if (next.reminder && !(await setDailyReminder(true, next.reminderHour).catch(() => false))) set({ reminder: false });
+              // schedule (or cancel) to match the restored setting
+              const ok = await setDailyReminder(next.reminder, next.reminderHour).catch(() => false);
+              if (next.reminder && !ok) set({ reminder: false });
               Alert.alert('Restored', `${n} new activities imported.`);
               storageBytes().then(setBytes).catch(() => undefined);
             } catch (e) { Alert.alert('Restore failed', String((e as Error)?.message ?? e)); }

@@ -4,7 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
-import { applyBackup, buildBackup } from './backup';
+import { applyBackup, buildBackup, parseBackup } from './backup';
 
 const TOKEN_KEY = 'stride_github_token';
 const META_KEY = 'stride:github-sync';
@@ -112,7 +112,13 @@ export async function pushToGithub(): Promise<number> {
       if (remote) await applyBackup(remote, { includeSettings: false });
       await set({ needsPull: false });
     }
-    const { json, count } = await buildBackup();
+    let { json, count, unreadable } = await buildBackup();
+    if (unreadable.length && meta.gistId) {
+      // activities this phone can't read back must not vanish from the cloud: keep the gist's copies
+      const remote = await downloadBackup(token, meta.gistId);
+      const keep = remote ? parseBackup(remote).activities.filter((a) => unreadable.includes(a.id)) : [];
+      if (keep.length) ({ json, count } = await buildBackup(keep));
+    }
     const body = JSON.stringify({ description: 'Stride activity backup (private)', files: { [FILE]: { content: json } } });
     let gistId = meta.gistId;
     if (gistId) {

@@ -79,6 +79,8 @@ export type Session = {
   segStartedAt?: number;
   /** Total time spent auto-paused (standing still), which interval workouts still count. */
   autoPausedMs?: number;
+  /** Id the saved activity will get, fixed at start so a retried save overwrites instead of duplicating. */
+  activityId?: string;
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {
