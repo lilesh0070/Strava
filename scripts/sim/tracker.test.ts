@@ -193,3 +193,17 @@ test('auto-pause still fires indoors where every fix is a Wi-Fi fix (acc > 50 m)
   assert.ok(moving <= 125, `moving time ${moving} s must not count the indoor minutes`);
   await tracker.discard();
 });
+
+test('running through a 60 s underpass (only 70 m fixes) is not a pause: moving time and best km stay true', async () => {
+  const geo = await import('../../src/lib/geo.ts');
+  await tracker.start('run');
+  await run(400, 5, 3);
+  await run(60, 70, 3); // blind stretch, still running
+  await run(400, 5, 3);
+  const s = tracker.getSession()!;
+  const elapsed = (clock - s.startedAt) / 1000;
+  assert.ok(sessionMovingSec(s, clock) >= elapsed - 2, `moving ${sessionMovingSec(s, clock)} of ${elapsed} s`);
+  const a = (await tracker.finish())!;
+  const km = geo.bestEffort(a.segments, 1000)!;
+  assert.ok(km >= 320, `best km ${km} s at a true 333 s (no zero-time jump across the blind stretch)`);
+});

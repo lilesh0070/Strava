@@ -150,8 +150,13 @@ export function bestEffort(segments: Point[][], target: number): number | null {
     if (!seg.length) continue;
     const g = groups[groups.length - 1];
     const prev = g?.[g.length - 1];
-    if (g && prev?.length && seg[0].t - prev[prev.length - 1].t <= EFFORT_BREAK_MS) g.push(seg);
-    else groups.push([seg]);
+    if (g && prev?.length && seg[0].t - prev[prev.length - 1].t <= EFFORT_BREAK_MS) {
+      // keep the stop out of the distance as well as the time: the recorded distance jumps across a pause by
+      // the resume hop, which would otherwise count as metres covered in zero seconds (fake fast PRs)
+      const end = prev[prev.length - 1].d, start = seg[0].d;
+      const off = end != null && start != null ? start - end : 0;
+      g.push(off > 0 ? seg.map((p) => (p.d == null ? p : { ...p, d: p.d - off })) : seg);
+    } else groups.push([seg]);
   }
   let best = Infinity;
   for (const group of groups) {

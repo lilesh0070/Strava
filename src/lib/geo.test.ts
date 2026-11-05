@@ -50,6 +50,11 @@ test('best effort never spans a pause: two rested 600 m reps are not a 1 km effo
   const half2 = line(6, 30).map((p) => ({ ...p, lat: p.lat + 0.006, t: p.t + 150_000 + 40_000 }));
   const e = bestEffort([half1, half2], 1000)!;
   assert.ok(e > 260 && e < 290, `1 km across a short stop: ${e} s`);
+  // with recorded distance, the resume hop between the halves (here 200 m) is not metres covered in 0 s
+  const r1 = line(6, 30).map((p, i) => ({ ...p, d: i * 111 }));
+  const r2 = line(6, 30).map((p, i) => ({ ...p, lat: p.lat + 0.008, t: p.t + 190_000, d: 555 + 200 + i * 111 }));
+  const e2 = bestEffort([r1, r2], 1000)!;
+  assert.ok(e2 > 260, `1 km with a 200 m resume hop: ${e2} s (would be ~215 s if the hop counted)`);
 });
 
 test('derived stats follow the recorded distance when points carry it', () => {

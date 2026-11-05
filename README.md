@@ -317,7 +317,9 @@ Read this before touching the parts below; each rule exists because breaking it 
   the auto-resume speed for walks in `tracker.ts`, so changing it changes auto-pause too. `STOPPED_MS` (0.4)
   is a different threshold (Kalman filter, "pace now"). A 0.5 m/s hiker must not be clipped.
 - Auto-pause is off for hikes on purpose, and auto-resume needs three fixes beyond the threshold (or one
-  accurate fix): a single multipath jump must not resume.
+  accurate fix): a single multipath jump must not resume. With no usable fixes (indoors, underpass, tunnel)
+  it waits 30 s instead of 12 s, and a resume far from the stop point (≥ 1 m/s on average) undoes the pause,
+  so running through a blind stretch is never removed from moving time or turned into a fake PR.
 - After changing any of this, run `npm run test:tracker`, `npm run sim:gps` and `npm run sim:autopause`
   and compare with today's baseline by eye (the simulators only print, nothing fails): `sim:gps` mean |error|
   ≈ 0.7 / 0.8 / 2.0 % (Android / iPhone / no Doppler) and `stand 10m` creep ≈ 3 / 5 / 50 m; `sim:autopause`

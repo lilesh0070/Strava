@@ -188,15 +188,21 @@ export function ingest(locations: Location.LocationObject[]) {
             s.hopN = accOk(f, 25) && hop >= hopNeeded ? (s.hopN ?? 0) + 1 : 0; // a 1-3 fix spike burst is not a move
             if (s.moveN >= 3 || s.hopN >= 3 || (s.hopN >= 1 && accOk(f, 15))) {
               const pausedFor = Math.max(0, sm.t - (s.pauseStartedAt ?? sm.t));
-              s.pausedMs += pausedFor;
-              s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
+              // Far from the stop point for the time "paused" (≥ 1 m/s on average, e.g. out of a tunnel or an
+              // underpass): the athlete never stopped, GPS just went blind. Undo the pause, keep the segment, so
+              // moving time, pace and best efforts count that stretch as moving.
+              const wasMoving = hop >= 25 && hop >= (pausedFor / 1000) * 1.0;
+              if (!wasMoving) {
+                s.pausedMs += pausedFor;
+                s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
+              }
               s.pauseStartedAt = null;
               s.status = 'recording';
               s.autoPaused = false;
               s.moveN = 0; s.hopN = 0;
-              s.distanceM = (s.distanceM ?? 0) + hop; // the first metres away from the stop point
-              s.segments.push([{ ...sm, d: r(s.distanceM, 1) }]);
-              s.segStartedAt = sm.t;
+              s.distanceM = (s.distanceM ?? 0) + hop; // the first metres away from the stop point / the blind stretch
+              if (wasMoving && seg.length) seg.push({ ...sm, d: r(s.distanceM, 1) });
+              else { s.segments.push([{ ...sm, d: r(s.distanceM, 1) }]); s.segStartedAt = sm.t; }
               s.ds = undefined; // distance stage restarts; the filter keeps its (settled) state
               cred.length = 0;
               if (settings.voiceCues) say(phrase().resumed);
@@ -240,8 +246,8 @@ export function ingest(locations: Location.LocationObject[]) {
               }
             }
           }
-        } else maybeAutoPause(s, seg, p.t); // a rejected jump is not movement
-      } else maybeAutoPause(s, seg, p.t); // indoors (Wi-Fi / cell fixes only) the idle clock still runs
+        } else maybeAutoPause(s, seg, p.t, BLIND_PAUSE_MS); // a rejected jump is not movement
+      } else maybeAutoPause(s, seg, p.t, BLIND_PAUSE_MS); // indoors (Wi-Fi / cell fixes only) the idle clock still runs
       stepWorkout(s, p.t); // time-based interval steps: checked on every fix, kept or not
     }
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
@@ -263,11 +269,16 @@ async function liveStats(force = false) {
  * Called for every fix that keeps no point, including inaccurate ones (indoors) and rejected jumps. Not for
  * hikes: a 0.5 m/s scramble over rocks looks like standing still to GPS and would pause every minute.
  */
-function maybeAutoPause(s: Session, seg: Point[], now: number) {
+/**
+ * Without usable fixes the app can't tell standing indoors from running through an underpass, so it waits
+ * longer before pausing; the pause is back-dated either way, and a resume far away undoes it (see ingest).
+ */
+const BLIND_PAUSE_MS = 30_000;
+function maybeAutoPause(s: Session, seg: Point[], now: number, after = AUTO_PAUSE_AFTER_MS) {
   if (!settings.autoPause || s.sport === 'hike' || s.status !== 'recording' || !((s.distanceM ?? 0) > 0)) return;
   const kept = seg[seg.length - 1];
   const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : now);
-  if (now - idleSince < AUTO_PAUSE_AFTER_MS) return;
+  if (now - idleSince < after) return;
   settleDistance(s);
   s.status = 'paused';
   s.autoPaused = true;
