@@ -78,8 +78,8 @@
     "extra": {
       "updateRepo": "lilesh0070/strava",
       "firebase": {
-        "apiKey": "",
-        "projectId": ""
+        "apiKey": "AIzaSyCmWgSnBdUQerKmM0mcf3xlqHcdmTAmXoQ",
+        "projectId": "stribe-a8108"
       }
     },
     "updates": {
