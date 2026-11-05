@@ -45,3 +45,25 @@ test('friendly errors', () => {
   assert.match(friendlyError(new Error('GitHub responded 403')), /busy/);
   assert.equal(friendlyError(new Error('Disk full')), 'Disk full');
 });
+
+test('update.json: sha256 and signing fingerprint are read and normalised; key changes need a reinstall', async () => {
+  const { fromManifest, needsReinstall, normSigner } = await import('./releaseInfo.ts');
+  const DEBUG = 'FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C';
+  const OTHER = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
+  const m = { version: '1.3.11', url: 'https://github.com/x/y/releases/download/v1.3.11/a.apk', sha256: 'AB'.repeat(32), signer: DEBUG.toLowerCase() };
+  const r = fromManifest(m)!;
+  assert.equal(r.sha256, 'ab'.repeat(32));
+  assert.equal(r.signer, DEBUG);
+  assert.equal(normSigner(DEBUG.replace(/:/g, '')), DEBUG);
+  assert.equal(normSigner('not a fingerprint'), '');
+  // junk values are ignored, not trusted
+  const j = fromManifest({ ...m, sha256: 'xyz', signer: 'abc' })!;
+  assert.equal(j.sha256, undefined);
+  assert.equal(j.signer, undefined);
+  // same key: normal in-app update; new key: one-time reinstall; unknown on either side: normal
+  assert.equal(needsReinstall(r, DEBUG), false);
+  assert.equal(needsReinstall(fromManifest({ ...m, signer: OTHER }), DEBUG), true);
+  assert.equal(needsReinstall(r, ''), false);
+  assert.equal(needsReinstall(fromManifest({ ...m, signer: undefined }), DEBUG), false);
+  assert.equal(needsReinstall(null, DEBUG), false);
+});

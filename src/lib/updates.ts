@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import * as Updates from 'expo-updates';
 import { useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
-import { friendlyError, fromApiRelease, fromManifest, newestRelease, pickUpdate, type ApkRelease } from './releaseInfo';
+import { friendlyError, fromApiRelease, fromManifest, needsReinstall, newestRelease, pickUpdate, type ApkRelease } from './releaseInfo';
 import { getSettings } from './storage';
 
 export type { ApkRelease } from './releaseInfo';
@@ -22,11 +22,13 @@ export type UpdateState = {
   apk: ApkRelease | null;
   apkProgress: number | null; // 0..1 while downloading
   error: string | null;
+  /** The update is signed with a different key: it has to be installed once by hand (see needsReinstall). */
+  reinstall: boolean;
 };
 
 let state: UpdateState = {
   checking: false, lastChecked: null, ota: Updates.isEnabled ? 'none' : 'disabled',
-  apk: null, apkProgress: null, error: null,
+  apk: null, apkProgress: null, error: null, reinstall: false,
 };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<UpdateState>) => { state = { ...state, ...patch }; listeners.forEach((l) => l()); };
@@ -36,7 +38,10 @@ export const getUpdateState = () => state;
 
 export const currentVersion = () => Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? '0.0.0';
 export const currentBuildId = () => Updates.updateId?.slice(0, 8) ?? (Updates.isEmbeddedLaunch ? 'embedded' : 'dev');
-const repo = () => (Constants.expoConfig?.extra as { updateRepo?: string } | undefined)?.updateRepo ?? 'lilesh0070/strava';
+const extra = () => (Constants.expoConfig?.extra ?? {}) as { updateRepo?: string; signer?: string };
+const repo = () => extra().updateRepo ?? 'lilesh0070/strava';
+/** Fingerprint of the key this build was signed with (written into app.json by the release workflow). */
+export const ownSigner = () => extra().signer ?? '';
 
 async function checkOta() {
   if (!Updates.isEnabled) return;
@@ -94,7 +99,8 @@ async function testRelease(): Promise<ApkRelease | null> {
 async function checkApk() {
   if (Platform.OS !== 'android') return;
   const { betaUpdates } = await getSettings();
-  set({ apk: pickUpdate(await (betaUpdates ? testRelease() : stableRelease()), currentVersion()) });
+  const apk = pickUpdate(await (betaUpdates ? testRelease() : stableRelease()), currentVersion());
+  set({ apk, reinstall: needsReinstall(apk, ownSigner()) });
 }
 
 /**
@@ -138,7 +144,7 @@ function cleanOldApks(keep: string) {
 /** Download the newer APK (reusing a complete earlier download) and open the system installer. */
 export async function installApk(): Promise<void> {
   const rel = state.apk;
-  if (!rel || state.apkProgress != null) return;
+  if (!rel || state.apkProgress != null || state.reinstall) return; // a key change can't install over this app
   set({ apkProgress: 0, error: null });
   try {
     const name = `tbdi-fittrack-${rel.version}.apk`;
@@ -157,6 +163,11 @@ export async function installApk(): Promise<void> {
       });
       // an interrupted transfer would make the installer fail with "problem parsing the package"
       if (!complete(file)) { if (file.exists) file.delete(); throw new Error('The download was incomplete. Please try again.'); }
+    }
+    // the APK must be exactly the one the release published (a damaged or swapped file is never installed)
+    if (rel.sha256) {
+      const got = await (file as unknown as { digest(a: 'SHA-256'): Promise<string> }).digest('SHA-256');
+      if (got.toLowerCase() !== rel.sha256) { file.delete(); throw new Error('The downloaded file does not match the release. Please try again.'); }
     }
     set({ apkProgress: 1 });
     await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {

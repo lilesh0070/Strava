@@ -123,6 +123,16 @@ export default function SettingsScreen() {
           <View style={{ flexDirection: 'row', gap: 12 }}>
             {u.ota === 'ready' ? (
               <NeuButton accent icon="restart" label={t('upd.restart')} style={{ flex: 1 }} onPress={() => applyOta()} />
+            ) : u.apk && u.reinstall ? (
+              <View style={{ flex: 1, gap: 10 }}>
+                <NeuCard inset radius={18} padding={12} style={{ gap: 4 }}>
+                  <Text style={{ color: C.text, fontWeight: '800' }}>{t('upd.reinstallTitle')}</Text>
+                  <Text style={{ color: C.muted, fontSize: 13 }}>{t('upd.reinstallBody')}</Text>
+                </NeuCard>
+                <NeuButton icon="cloud-upload-outline" label={t('upd.backupNow')}
+                  onPress={() => exportBackup().catch((e) => Alert.alert(t('set.backup'), String(e?.message ?? e)))} />
+                <NeuButton accent icon="download" label={t('upd.downloadApk')} onPress={() => Linking.openURL(u.apk!.url)} />
+              </View>
             ) : u.apk ? (
               <NeuButton accent icon="download" label={downloading ? t('upd.dl') : t('upd.install')} style={{ flex: 1 }}
                 disabled={downloading} onPress={() => installApk()} />
@@ -131,7 +141,7 @@ export default function SettingsScreen() {
                 disabled={u.checking} onPress={() => checkForUpdates()} />
             )}
           </View>
-          {u.apk ? (
+          {u.apk && !u.reinstall ? (
             <Text style={{ color: C.muted, fontSize: 11 }}>{t('upd.androidNote')}</Text>
           ) : null}
           {u.apk && u.error && !downloading ? (

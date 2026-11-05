@@ -46,8 +46,8 @@ export default function UpdateBanner() {
         onPress={() => {
           if (otaReady) { applyOta(); return; }
           setDismissedFor(u.apk?.version ?? '');
-          router.push('/settings'); // shows the download progress
-          installApk();
+          router.push('/settings'); // shows the download progress (or, after a key change, the reinstall steps)
+          if (!u.reinstall) installApk();
         }} />
     </View>
   );

@@ -127,6 +127,30 @@ jobs:
             echo "::notice::No ANDROID_KEYSTORE_BASE64 secret, signing with the shared debug key"
           fi
 
+      # The app and update.json carry the signing certificate's fingerprint. When the key changes (e.g. from the
+      # shared debug key to a private release key), phones see that the update can't install over the old app
+      # and guide the user through a one-time reinstall instead of failing in the Android installer.
+      - name: Signing fingerprint
+        if: env.SKIP != '1'
+        env:
+          STRIDE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          STRIDE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$STRIDE_KEYSTORE_FILE" ]; then
+            FP=$(keytool -list -v -keystore "$STRIDE_KEYSTORE_FILE" -storepass "$STRIDE_KEYSTORE_PASSWORD" -alias "$STRIDE_KEY_ALIAS" | awk '/SHA256:/{print $2; exit}')
+          else
+            FP=$(keytool -list -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey | awk '/SHA256:/{print $2; exit}')
+          fi
+          echo "$FP" | grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' || { echo "::error::Could not read the signing certificate fingerprint"; exit 1; }
+          echo "SIGNER=$FP" >> "$GITHUB_ENV"
+          echo "Signing certificate SHA-256: $FP"
+          # embedded in the app's config (read at build time by expo-constants); not committed
+          SIGNER="$FP" node -e '
+            const fs = require("fs"); const j = JSON.parse(fs.readFileSync("app.json"));
+            j.expo.extra = { ...(j.expo.extra || {}), signer: process.env.SIGNER };
+            fs.writeFileSync("app.json", JSON.stringify(j, null, 2) + "\n");
+          '
+
       - name: Build APK
         if: env.SKIP != '1'
         working-directory: android
@@ -155,14 +179,14 @@ jobs:
         run: |
           node -e '
             const fs = require("fs"), crypto = require("crypto");
-            const { TAG, REPO, NOTES } = process.env;
+            const { TAG, REPO, NOTES, SIGNER } = process.env;
             const apk = `tbdi-fittrack-${TAG}.apk`, buf = fs.readFileSync(`dist/${apk}`);
             const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
             const base = `https://github.com/${REPO}/releases`;
             fs.writeFileSync("dist/update.json", JSON.stringify({
               version: app.version, versionCode: app.android.versionCode, apk,
               url: `${base}/download/${TAG}/${apk}`, page: `${base}/tag/${TAG}`,
-              size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+              size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"), signer: SIGNER,
               notes: NOTES || "", publishedAt: new Date().toISOString(),
             }, null, 2) + "\n");
           '
