@@ -123,8 +123,14 @@ export default function SettingsScreen() {
               Android will ask you to allow installs from TBDI FitTrack the first time. Your activities are kept.
             </Text>
           ) : null}
+          {u.apk && u.error && !downloading ? (
+            <NeuButton small icon="open-in-new" label="Open download page" onPress={() => Linking.openURL(u.apk!.htmlUrl)} />
+          ) : null}
         </NeuCard>
         {toggle('update', t('set.checkAuto'), t('set.checkAutoSub'), 'autoCheckUpdates')}
+        <NeuTile icon="flask-outline" title={t('set.beta')} subtitle={t('set.betaSub')}
+          right={<NeuSwitch accessibilityLabel={t('set.beta')} value={s.betaUpdates}
+            onValueChange={async (v) => { await set({ betaUpdates: v }); checkForUpdates(); }} />} />
       </Section>
 
       <Section title={t('set.appearance')}>

@@ -143,6 +143,29 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "dist/tbdi-fittrack-${TAG}.apk"
           ls -lh dist
 
+      # The app reads releases/latest/download/update.json, which GitHub serves from its download CDN
+      # without the REST API's 60-requests-per-hour-per-IP limit (many phones share one office IP).
+      - name: Write update manifest
+        if: env.SKIP != '1'
+        env:
+          NOTES: ${{ inputs.notes }}
+          REPO: ${{ github.repository }}
+        run: |
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const { TAG, REPO, NOTES } = process.env;
+            const apk = `tbdi-fittrack-${TAG}.apk`, buf = fs.readFileSync(`dist/${apk}`);
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
+            const base = `https://github.com/${REPO}/releases`;
+            fs.writeFileSync("dist/update.json", JSON.stringify({
+              version: app.version, versionCode: app.android.versionCode, apk,
+              url: `${base}/download/${TAG}/${apk}`, page: `${base}/tag/${TAG}`,
+              size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+              notes: NOTES || "", publishedAt: new Date().toISOString(),
+            }, null, 2) + "\n");
+          '
+          cat dist/update.json
+
       - name: Publish GitHub release
         if: env.SKIP != '1'
         uses: softprops/action-gh-release@v2
@@ -154,4 +177,6 @@ jobs:
           # pre-releases never become "latest", so the in-app updater (releases/latest) ignores them
           prerelease: ${{ inputs.prerelease == true }}
           generate_release_notes: true
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/update.json

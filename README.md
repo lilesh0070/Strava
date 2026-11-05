@@ -63,9 +63,12 @@ Wellbeing guidance only, not medical advice.
 - **Profile.** An 8-week distance chart with a weekly goal, all-time totals, and running best efforts (1k / 5k / 10k / half).
 
 - **Settings (cog, top-right).** App updates, theme (Auto/Light/Dark), language, voice, auto-pause, start countdown, GPS accuracy, workday break reminders, and backup/restore.
-- **In-app updates.**
+- **In-app updates.** Any phone with internet finds a new GitHub release on its own:
+  - It checks when the app opens and again when you come back to it (at most every 3 hours), or any time with **Settings → Check for updates**. A banner says when a new version is out, and **Update** downloads it with a progress bar and opens the Android installer. Your data is kept.
+  - It reads a small `update.json` that every release ships, from GitHub's download CDN. That avoids the GitHub API's 60-requests-per-hour-per-IP limit, which a whole office on one Wi-Fi would hit. Older releases fall back to the API.
+  - The APK's size is checked before installing, so a broken download never reaches the installer. An earlier complete download is reused. If downloading fails there is an "Open download page" button.
+  - **Test builds:** releases marked *pre-release* are only offered to phones with **Settings → Test builds** on.
   - **OTA:** JS changes published with `eas update` download in the background, and a "Restart" button applies them.
-  - **New APK:** "Check for updates" reads the latest GitHub Release. If it is newer than the installed version, the APK downloads with a progress bar and the Android installer opens.
 - **Precise live tracking.**
   - Full GPS (best-for-navigation) every second with no distance filter, so the live position never goes stale, even when you stand still.
   - A constant-velocity Kalman filter fed with the GPS chip's Doppler speed and course: no zig-zag, no lag behind you, no corner cutting.
@@ -116,13 +119,15 @@ All data is stored on the device with AsyncStorage.
 Everything runs on GitHub. No Expo account and no computer are needed, and it works from the GitHub mobile app.
 
 1. Open **GitHub → Actions → Release APK → Run workflow**.
-2. Type the new version (e.g. `1.2.0`) and, optionally, release notes.
+2. Type the new version (e.g. `1.2.0`) and, optionally, release notes (shown in the app's update screen). Tick **prerelease** for a test build that only phones with *Test builds* on are offered.
 3. The workflow then does the rest:
    - runs the tests;
    - bumps `app.json`, then commits and tags;
    - generates the Android project and builds the APK with Gradle;
    - publishes a **GitHub Release** with `tbdi-fittrack-v1.2.0.apk` attached.
-4. On the phone, **Settings → Check for updates** finds the release, downloads the APK with a progress bar and opens the installer.
+4. Every phone with internet then sees the update: automatically (banner) or with **Settings → Check for updates**.
+
+To send a tested pre-release to everyone: open it on GitHub → **Edit** → untick *Set as a pre-release*, tick *Set as the latest release* → **Update release**.
 
 Pushing a tag (`git tag v1.2.0 && git push --tags`) does the same.
 

@@ -52,6 +52,7 @@ export type Settings = {
   theme: ThemeChoice;
   gpsMode: GpsMode;
   autoCheckUpdates: boolean;
+  betaUpdates: boolean; // also offer pre-release (test) builds
   targetPaceSec: number | null; // pace coach target (sec/km); null = off
   reminder: boolean;
   reminderHour: number;
@@ -64,7 +65,7 @@ export type Settings = {
   workDays: 'mon-fri' | 'mon-sat';
 };
 export const DEFAULT_SETTINGS: Settings = {
-  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, targetPaceSec: null,
+  voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, betaUpdates: false, targetPaceSec: null,
   reminder: false, reminderHour: 18, language: 'en',
   breakReminders: false, breakEveryMin: 60, workStartH: 9, workEndH: 18, workDays: 'mon-fri',
 };

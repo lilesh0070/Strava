@@ -1,17 +1,19 @@
 // Two-channel update system:
 //  1. Over-the-air (EAS Update): JS/asset changes. Downloaded in the background, applied on restart.
-//  2. Full APK (GitHub Releases): native changes. Downloaded with progress, then handed to the
-//     Android package installer.
+//  2. Full APK (GitHub Releases): native changes. Any phone with internet finds a new release (see
+//     releaseInfo.ts for how this avoids GitHub's per-IP API limit), downloads it with progress, checks
+//     the file is complete and hands it to the Android package installer.
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Updates from 'expo-updates';
 import { useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
-import { compareVersions } from './semver';
+import { friendlyError, fromApiRelease, fromManifest, newestRelease, pickUpdate, type ApkRelease } from './releaseInfo';
+import { getSettings } from './storage';
 
-export type ApkRelease = { version: string; notes: string; url: string; size: number; name: string; htmlUrl: string };
+export type { ApkRelease } from './releaseInfo';
 
 export type UpdateState = {
   checking: boolean;
@@ -45,53 +47,101 @@ async function checkOta() {
   set({ ota: f.isNew ? 'ready' : 'none' });
 }
 
-async function checkApk() {
-  if (Platform.OS !== 'android') return;
-  const res = await fetch(`https://api.github.com/repos/${repo()}/releases/latest`, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
-  if (res.status === 404) { set({ apk: null }); return; } // no releases yet
-  if (!res.ok) throw new Error(`GitHub responded ${res.status}`);
-  const rel = await res.json();
-  const asset = (rel.assets ?? []).find((a: { name: string }) => a.name.toLowerCase().endsWith('.apk'));
-  const version = String(rel.tag_name ?? '');
-  if (asset && compareVersions(version, currentVersion()) > 0) {
-    set({ apk: { version: version.replace(/^v/i, ''), notes: rel.body ?? '', url: asset.browser_download_url,
-      size: asset.size ?? 0, name: asset.name, htmlUrl: rel.html_url } });
-  } else set({ apk: null });
+const NO_CACHE = { 'Cache-Control': 'no-cache', Pragma: 'no-cache' };
+const api = (path: string) => fetch(`https://api.github.com/repos/${repo()}${path}`, {
+  headers: { Accept: 'application/vnd.github+json', ...NO_CACHE },
+});
+
+/** The latest normal release. */
+async function stableRelease(): Promise<ApkRelease | null> {
+  // 1. update.json via the download CDN (no per-IP API limit). A network error means we're offline.
+  const res = await fetch(`https://github.com/${repo()}/releases/latest/download/update.json`, { headers: NO_CACHE });
+  if (res.ok) {
+    try { const m = fromManifest(JSON.parse(await res.text())); if (m) return m; } catch { /* not a manifest */ }
+  }
+  // 2. Releases published before update.json existed: ask the API.
+  const r = await api('/releases/latest');
+  if (r.status === 404) return null; // no releases yet
+  if (!r.ok) throw new Error(`GitHub responded ${r.status}`);
+  return fromApiRelease(await r.json());
 }
 
-/** Check both channels. Safe to call repeatedly; concurrent calls are coalesced. */
+/** Newest release including test builds (pre-releases), for testers. */
+async function testRelease(): Promise<ApkRelease | null> {
+  const r = await api('/releases?per_page=15');
+  if (!r.ok) return stableRelease(); // e.g. API limit reached: normal releases still work
+  const newest = newestRelease(await r.json());
+  const stable = await stableRelease().catch(() => null);
+  return pickUpdate(newest, stable?.version ?? '0') ?? stable;
+}
+
+async function checkApk() {
+  if (Platform.OS !== 'android') return;
+  const { betaUpdates } = await getSettings();
+  set({ apk: pickUpdate(await (betaUpdates ? testRelease() : stableRelease()), currentVersion()) });
+}
+
+/**
+ * Check both channels. Safe to call repeatedly; concurrent calls are coalesced. `silent` (automatic
+ * checks) keeps quiet about failures such as being offline; a manual check shows them.
+ */
 let inflight: Promise<void> | null = null;
-export function checkForUpdates(): Promise<void> {
+export function checkForUpdates(opts: { silent?: boolean } = {}): Promise<void> {
   if (inflight) return inflight;
   set({ checking: true, error: null });
   inflight = (async () => {
     const results = await Promise.allSettled([checkOta(), checkApk()]);
     const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failed && results[0].status === 'rejected') set({ ota: 'error' });
-    set({ checking: false, lastChecked: Date.now(), error: failed ? String(failed.reason?.message ?? failed.reason) : null });
+    set({ checking: false, lastChecked: failed ? state.lastChecked : Date.now(),
+      error: failed && !opts.silent ? friendlyError(failed.reason) : null });
   })().finally(() => { inflight = null; });
   return inflight;
+}
+
+/** Automatic re-check when the app comes back to the screen, at most every few hours. */
+const RECHECK_MS = 3 * 3600_000;
+export function checkIfStale() {
+  if (state.checking || state.apkProgress != null) return;
+  if (state.lastChecked && Date.now() - state.lastChecked < RECHECK_MS) return;
+  checkForUpdates({ silent: true }).catch(() => undefined);
 }
 
 /** Restart into the downloaded OTA bundle. */
 export const applyOta = () => Updates.reloadAsync();
 
-/** Download the newer APK and open the system installer. */
+/** Remove APKs of older updates left in the cache. */
+function cleanOldApks(keep: string) {
+  try {
+    for (const f of new Directory(Paths.cache).list()) {
+      if (f instanceof File && /^(tbdi-fittrack|stride)-.*\.apk$/i.test(f.name) && f.name !== keep) f.delete();
+    }
+  } catch { /* best effort */ }
+}
+
+/** Download the newer APK (reusing a complete earlier download) and open the system installer. */
 export async function installApk(): Promise<void> {
   const rel = state.apk;
-  if (!rel) return;
+  if (!rel || state.apkProgress != null) return;
   set({ apkProgress: 0, error: null });
   try {
-    const dest = new File(Paths.cache, `tbdi-fittrack-${rel.version}.apk`);
-    const file = await File.downloadFileAsync(rel.url, dest, {
-      idempotent: true,
-      onProgress: ({ bytesWritten, totalBytes }) => {
-        const total = totalBytes > 0 ? totalBytes : rel.size;
-        if (total > 0) set({ apkProgress: bytesWritten / total });
-      },
-    });
+    const name = `tbdi-fittrack-${rel.version}.apk`;
+    cleanOldApks(name);
+    const dest = new File(Paths.cache, name);
+    const complete = (f: File) => f.exists && (f.size ?? 0) > 0 && (!rel.size || f.size === rel.size);
+    let file = dest;
+    if (!complete(dest)) {
+      if (dest.exists) dest.delete(); // a half-finished earlier download
+      file = await File.downloadFileAsync(rel.url, dest, {
+        idempotent: true,
+        onProgress: ({ bytesWritten, totalBytes }) => {
+          const total = totalBytes > 0 ? totalBytes : rel.size;
+          if (total > 0) set({ apkProgress: Math.min(1, bytesWritten / total) });
+        },
+      });
+      // an interrupted transfer would make the installer fail with "problem parsing the package"
+      if (!complete(file)) { if (file.exists) file.delete(); throw new Error('The download was incomplete. Please try again.'); }
+    }
     set({ apkProgress: 1 });
     await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
       data: (file as unknown as { contentUri: string }).contentUri,
@@ -99,7 +149,7 @@ export async function installApk(): Promise<void> {
       flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
     });
   } catch (e) {
-    set({ error: `Download failed: ${(e as Error)?.message ?? e}` });
+    set({ error: `Download failed: ${friendlyError(e)}` });
   } finally {
     set({ apkProgress: null });
   }
