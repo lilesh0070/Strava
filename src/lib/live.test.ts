@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { haversine, type Point } from './geo.ts';
 import {
-  STOPPED_MS, fixVelocity, gpsHealth, kalmanStep, lapsFromMarks, paceAdvice, parsePace, rollingSpeed, type KalmanState,
+  STOPPED_MS, distancePending, distanceStep, fixVelocity, gpsHealth, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, parsePace, rollingSpeed, type KalmanState,
 } from './live.ts';
 
 const pt = (lat: number, lng: number, t: number, acc = 5): Point => ({ lat, lng, alt: null, acc, t });
@@ -102,4 +102,51 @@ test('gps health', () => {
   assert.equal(gpsHealth(pt(0, 0, 0, 8), 5000), 'good');
   assert.equal(gpsHealth(pt(0, 0, 0, 30), 5000), 'weak');
   assert.equal(gpsHealth(pt(0, 0, 0, 8), 20000), 'lost');
+});
+
+test('fixVelocity: Android "speed 0, no course" is no measurement, not a stop', () => {
+  const f = (spd: number | null, hdg: number | null) => ({ ...pt(0, 0, 0, 6), spd, hdg });
+  assert.equal(fixVelocity(f(0, 0), 0.3), null); // a walker on a phone without Doppler must not be pinned at 0
+  assert.equal(fixVelocity(f(0, 0), 0), null);
+  assert.deepEqual(fixVelocity(f(0, 90)), { ve: 0, vn: 0, sd: 0.3 }); // 0 with a course: a real stop
+});
+
+test('kalman without Doppler still tracks walking speed', () => {
+  let k: KalmanState | null = null;
+  const speeds: number[] = [];
+  for (let i = 0; i <= 90; i++) {
+    const f = { ...pt(19 + (1.3 * i + noise(i) * 5) / M, 72.8 + noise(i + 300) * 5 / M, i * 1000, 8), spd: 0, hdg: 0 };
+    k = kalmanStep(k, f, 1);
+    if (i > 30) speeds.push(Math.hypot(k.ve, k.vn));
+  }
+  const median = speeds.sort((a, b) => a - b)[Math.floor(speeds.length / 2)];
+  assert.ok(median > 0.8 && median < 2.0, `median filtered speed ${median} m/s for a 1.3 m/s walk`);
+  assert.equal(hasDoppler(k, 90_000), false);
+});
+
+test('distanceStep: velocity integration on foot with Doppler, position for rides', () => {
+  const kf = (ve: number, dopT?: number): KalmanState => ({ lat: 19, lng: 72.8, ve, vn: 0, pp: 4, pv: 0, vv: 1, t: 10_000, n: 10, rej: 0, vs: ve, dopT });
+  const f = { ...pt(19, 72.8, 10_000, 5), spd: 3, hdg: 90 };
+  assert.ok(Math.abs(distanceStep({}, kf(3, 10_000), f, 'run', 3, 1, 3.4) - 3) < 1e-9); // 3 m/s × 1 s, not the 3.4 m gap
+  assert.equal(distanceStep({}, kf(8, 10_000), f, 'ride', 8, 1, 7.6), 7.6); // rides: the position gap
+  // without recent Doppler the smoothed/gated path is used: nothing credited until the anchor moves
+  const ds = {};
+  assert.equal(distanceStep(ds, kf(1.3), f, 'walk', 1.3, 1, 1.3), 0);
+});
+
+test('distanceStep without Doppler credits a steady walk within a few percent', () => {
+  const ds = {};
+  let dist = 0, prev = 0;
+  for (let i = 1; i <= 300; i++) {
+    const lat = 19 + (1.3 * i) / M;
+    const k: KalmanState = { lat, lng: 72.8, ve: 0, vn: 1.3, pp: 4, pv: 0, vv: 1, t: i * 1000, n: i, rej: 0, vs: 1.3 };
+    const f = { ...pt(lat, 72.8, i * 1000, 8), spd: 0, hdg: 0 };
+    dist += distanceStep(ds, k, f, 'walk', prev, 1, 1.3);
+    prev = 1.3;
+  }
+  // the smoother lags a little behind (held back until the next anchor / the end of the segment)
+  assert.ok(dist > 390 * 0.9 && dist <= 390 * 1.03, `credited ${dist} m for 390 m`);
+  dist += distancePending(ds);
+  // the smoother's start-up lag costs a fixed ~20 m per segment (0.4 % of a 5 km walk)
+  assert.ok(Math.abs(dist - 390) / 390 < 0.07, `with the pending rest: ${dist} m for 390 m`);
 });

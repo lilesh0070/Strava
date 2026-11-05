@@ -16,7 +16,7 @@ import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
-import { STOPPED_MS, kalmanStep, lapsFromMarks, paceAdvice, processNoise, rollingSpeed, type GpsFix, type KalmanState } from './live';
+import { STOPPED_MS, distancePending, distanceStep, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, processNoise, rollingSpeed, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
 import { readBlob, removeBlob, writeBlob } from './blobStore';
@@ -176,6 +176,8 @@ export function ingest(locations: Location.LocationObject[]) {
           s.segments.push([p]);
           s.segStartedAt = p.t;
           s.kf = null;
+          s.ds = undefined;
+          s.lastSpeed = undefined;
           if (settings.voiceCues) say(phrase().resumed);
         }
         stepWorkout(s, p.t); // a standing (auto-paused) rest still counts down
@@ -199,9 +201,21 @@ export function ingest(locations: Location.LocationObject[]) {
           if (seg.length && Math.hypot(kf.ve, kf.vn) < STOPPED_MS) ok = false;
         }
       }
-      if (ok && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12)) {
+      // Without Doppler, distanceStep() smooths and gates the position itself, so every filtered fix must
+      // reach it (a 3 m pre-gate here would drop most walking fixes and leave big jumps to credit).
+      const minGap = s.kf && !s.kf.outlier && !hasDoppler(s.kf, f.t) ? 0.5 : 3;
+      if (ok && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12, minGap)) {
         const prev = seg[seg.length - 1];
-        if (prev) s.distanceM = (s.distanceM ?? 0) + haversine(prev, q);
+        const speedNow = s.kf ? Math.hypot(s.kf.ve, s.kf.vn) : 0;
+        if (prev) {
+          const dPos = haversine(prev, q);
+          // smoothed fixes credit distance through distanceStep() (see live.ts); raw ones add the plain gap
+          const add = s.kf && !s.kf.outlier && accOk(f, 35)
+            ? distanceStep((s.ds ??= {}), s.kf, f, s.sport, s.lastSpeed ?? speedNow, (q.t - prev.t) / 1000, dPos)
+            : dPos;
+          s.distanceM = (s.distanceM ?? 0) + add;
+        }
+        s.lastSpeed = speedNow;
         // filtered Doppler speed: no spikes from a single noisy fix
         if (s.kf && s.kf.n > 5) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, s.kf.vs);
         seg.push(q);
@@ -221,6 +235,7 @@ export function ingest(locations: Location.LocationObject[]) {
         const kept = seg[seg.length - 1];
         const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : p.t);
         if (settings.autoPause && shouldAutoPause(idleSince, p.t) && (s.distanceM ?? 0) > 0) {
+          settleDistance(s);
           s.status = 'paused';
           s.autoPaused = true;
           s.pauseStartedAt = idleSince;
@@ -232,6 +247,12 @@ export function ingest(locations: Location.LocationObject[]) {
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
     notify();
   });
+}
+
+/** Credit the distance the no-Doppler smoother still holds back; called when a segment ends. */
+function settleDistance(s: Session) {
+  const rest = distancePending(s.ds);
+  if (rest > 0) { s.distanceM = (s.distanceM ?? 0) + rest; if (s.ds) { s.ds.ax = s.ds.sx; s.ds.ay = s.ds.sy; } }
 }
 
 function coachPace(s: Session, seg: Point[], now: number) {
@@ -268,8 +289,14 @@ export function workoutTick() {
 export function currentSpeed(): number | null {
   if (!session || session.status !== 'recording') return null;
   const kf = session.kf;
-  if (kf && typeof kf.vs === 'number' && kf.n > 2 && Date.now() - lastFixAt < 5_000) return kf.vs < STOPPED_MS ? null : kf.vs;
-  return rollingSpeed(session.segments[session.segments.length - 1], 30);
+  if (kf && typeof kf.vs === 'number' && kf.n > 2 && Date.now() - lastFixAt < 5_000 && hasDoppler(kf, Date.now())) {
+    return kf.vs < STOPPED_MS ? null : kf.vs;
+  }
+  // no Doppler: the track itself (last 30 s of kept points); 0 once nothing has been kept for a while
+  const seg = session.segments[session.segments.length - 1];
+  const last = seg[seg.length - 1];
+  if (!last || Date.now() - last.t > 15_000) return null;
+  return rollingSpeed(seg, 30);
 }
 
 /** Close the current lap. */
@@ -553,6 +580,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
 export function pause() {
   return locked(async () => {
     if (!session || session.status !== 'recording') return;
+    settleDistance(session);
     session.status = 'paused';
     session.autoPaused = false;
     session.pauseStartedAt = Date.now();
@@ -572,6 +600,8 @@ export function resume() {
     session.status = 'recording';
     session.autoPaused = false;
     session.kf = null;
+    session.ds = undefined;
+    session.lastSpeed = undefined;
     session.segments.push([]);
     session.segStartedAt = now;
     await persist();
@@ -599,7 +629,10 @@ export async function finish(): Promise<Activity | null> {
     const segments = s.segments.filter((seg) => seg.length > 1);
     const now = Date.now();
     const movingSec = Math.round(sessionMovingSec(s, now));
-    const distanceM = totalDistance(segments);
+    if (s.status === 'recording') settleDistance(s);
+    // the running total is the accurate one (Doppler-integrated / smoothed, see live.ts distanceStep);
+    // the plain point-to-point sum is only a fallback for sessions saved by older versions
+    const distanceM = Math.round(s.distanceM != null && s.distanceM > 0 ? s.distanceM : totalDistance(segments));
     const a: Activity = {
       id: (s.activityId ??= newActivityId(s.startedAt)), // stable across retries: a retried save overwrites
       name: defaultName(s.sport, s.startedAt),

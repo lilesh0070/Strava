@@ -39,10 +39,17 @@ test('best effort finds fastest km', () => {
   assert.equal(bestEffort([line(3, 10)], 1000), null);
 });
 
-test('elevation gain ignores small noise', () => {
+test('elevation gain ignores small noise and GPS altitude wander', () => {
   const seg = line(40, 10, (i) => 100 + (i % 2 ? 1.5 : 0) + (i > 20 ? 30 : 0));
   const g = elevationGain([seg]);
-  assert.ok(g >= 29 && g <= 33, String(g));
+  assert.ok(g >= 22 && g <= 33, String(g)); // the 30 m step is smoothed over ~20 s, so a little lags past the end
+  // flat road, but the altitude wanders ±6 m in slow waves (typical phone GPS): no climb should be counted
+  const flat = line(600, 2.5, (i) => 100 + 6 * Math.sin(i / 9) + (i % 3 - 1) * 2);
+  assert.ok(elevationGain([flat]) < 15, String(elevationGain([flat])));
+  // a real 50 m climb over 1 km still counts (allow the smoothing to lag a little)
+  const climb = line(400, 2.5, (i) => 100 + Math.min(50, i * 0.125) + (i % 2 ? 2 : -2));
+  const gc = elevationGain([climb]);
+  assert.ok(gc >= 40 && gc <= 60, String(gc));
 });
 
 test('point filter', () => {

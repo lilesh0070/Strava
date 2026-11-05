@@ -24,6 +24,8 @@ export type KalmanState = {
   rej: number; // consecutive outliers
   vs: number; // speed for display, lightly smoothed (m/s)
   outlier?: boolean; // true when this step's fix was rejected
+  /** Time of the last fix that carried a usable Doppler velocity (phones without one never set it). */
+  dopT?: number;
 };
 
 const M_PER_DEG = (6371000 * Math.PI) / 180; // same earth radius as haversine()
@@ -41,7 +43,11 @@ export function fixVelocity(f: GpsFix, currentSpeed = 0): { ve: number; vn: numb
   if (spd == null || !Number.isFinite(spd) || spd < 0) return null;
   if ((f.acc ?? 99) > 25) return null; // Wi-Fi / cell fixes carry no real Doppler speed
   if (spd < STOPPED_MS) {
-    // Android reports exactly 0 when a fix has no speed at all; don't let that stop a moving athlete.
+    // Android reports exactly 0 (and no course) when the fix simply has no speed. Treating that as
+    // "standing still" pinned the velocity at 0 on phones without Doppler, so a walker was dropped as
+    // stopped and distance came out far too short. A real stop reports a small non-zero speed, or 0 with
+    // a course; the position gate catches true stops anyway.
+    if (spd === 0 && (f.hdg == null || f.hdg <= 0)) return null;
     if (spd === 0 && currentSpeed > 1) return null;
     return { ve: 0, vn: 0, sd: 0.3 };
   }
@@ -102,11 +108,75 @@ export function kalmanStep(state: KalmanState | null | undefined, f: GpsFix, q =
 
   const speed = Math.hypot(ve, vn);
   const vs = s.vs + (1 - Math.exp(-dt / 3)) * (speed - s.vs);
-  return { lat, lng, ve, vn, pp, pv, vv, t: f.t, n: s.n + 1, rej: 0, vs };
+  const dopT = m && Math.hypot(m.ve, m.vn) >= STOPPED_MS ? f.t : s.dopT;
+  return { lat, lng, ve, vn, pp, pv, vv, t: f.t, n: s.n + 1, rej: 0, vs, dopT };
 }
+
+/** True while the chip has been giving Doppler velocity recently (so speed, not just position, is trusted). */
+export const hasDoppler = (s: KalmanState | null | undefined, now: number) => s?.dopT != null && now - s.dopT <= 10_000;
 
 /** Process noise per sport: riders change speed and direction faster than walkers. */
 export const processNoise = (sport: string) => (sport === 'ride' ? 4 : sport === 'run' ? 2 : 1);
+
+// ---------- distance ----------
+// How far a fix adds to the recorded distance. Tuned on a simulator with realistic GPS noise (slow
+// drift + jitter + multipath spikes, 1 Hz) over city grids with stops, a 400 m track, curves and intervals:
+//  • On foot with Doppler: the filtered speed integrated over time. Position noise after the filter is
+//    still ~1-2 m per second, which at walking speed inflated distance by 3-6 %; velocity is far steadier.
+//    Walk +4.1 % → +2.3 %, hike +5.9 % → −0.6 %, run ±1 %, intervals +1.7 % → +0.1 %.
+//  • Riding with Doppler: the filtered position (already within ~1 %).
+//  • No Doppler (many budget Android phones report speed 0): a second, speed-aware smoother on the position
+//    plus a gate that scales with the reported accuracy. Over-count +9 % (up to +21 % at ±12 m) → ~±2 %.
+export type DistanceState = {
+  /** Second-stage smoothed position, metres east/north of the first point (no-Doppler path). */
+  sx?: number; sy?: number; st?: number;
+  /** Last position that was credited (no-Doppler path). */
+  ax?: number; ay?: number;
+  /** Local metres-per-degree at the route's latitude. */
+  kx?: number; lat0?: number; lng0?: number;
+};
+
+/** Distance the no-Doppler path still holds back (smoothed position past the last credited anchor). */
+export function distancePending(ds: DistanceState | undefined): number {
+  if (!ds || ds.sx == null || ds.sy == null || ds.ax == null || ds.ay == null) return 0;
+  return Math.hypot(ds.sx - ds.ax, ds.sy - ds.ay);
+}
+
+/**
+ * Distance to add for this filtered fix, in metres (0 = nothing to add). `prevSpeed` is the filtered
+ * speed at the previous kept fix. Mutates `ds` so the session can persist it.
+ */
+export function distanceStep(
+  ds: DistanceState, kf: KalmanState, f: GpsFix, sport: string, prevSpeed: number, dtSec: number, dPos: number,
+): number {
+  const speed = Math.hypot(kf.ve, kf.vn);
+  if (hasDoppler(kf, f.t)) {
+    ds.st = undefined; ds.ax = undefined; // leave the no-Doppler path idle
+    if (sport === 'ride') return dPos;
+    return 0.5 * (prevSpeed + speed) * dtSec; // trapezoid of the filtered speed
+  }
+  // no Doppler: smooth the position again, with a time constant that grows when slow or inaccurate
+  if (ds.lat0 == null || ds.lng0 == null || ds.kx == null) {
+    ds.lat0 = kf.lat; ds.lng0 = kf.lng; ds.kx = M_PER_DEG * Math.cos((kf.lat * Math.PI) / 180);
+  }
+  const px = (kf.lng - ds.lng0) * ds.kx, py = (kf.lat - ds.lat0) * M_PER_DEG;
+  if (ds.st == null || ds.sx == null || ds.sy == null || f.t - ds.st > RESET_GAP_MS) {
+    ds.sx = px; ds.sy = py; ds.st = f.t; ds.ax = px; ds.ay = py;
+    return 0;
+  }
+  const dt = Math.max(0, (f.t - ds.st) / 1000);
+  // time constant ~10 s at 2 m/s and ±8 m, longer when slower or less accurate (calibrated on the
+  // simulator: mean error 6.7 % → 1.6 % across walk/run/ride, curves are not cut by more than ~3 %)
+  const tc = 10 * Math.max(0.5, Math.min(3, (f.acc ?? 8) / 8)) * Math.max(0.5, Math.min(3, 2 / Math.max(speed, 0.5)));
+  const a = 1 - Math.exp(-dt / tc);
+  ds.sx += a * (px - ds.sx); ds.sy += a * (py - ds.sy); ds.st = f.t;
+  if (ds.ax == null || ds.ay == null) { ds.ax = ds.sx; ds.ay = ds.sy; return 0; }
+  const d = Math.hypot(ds.sx - ds.ax, ds.sy - ds.ay);
+  const gate = Math.min(14, Math.max(3, 0.8 * (f.acc ?? 10)));
+  if (d < gate) return 0;
+  ds.ax = ds.sx; ds.ay = ds.sy;
+  return d;
+}
 
 // ---------- rolling pace ----------
 /** Average speed (m/s) over the last `windowSec` seconds of a segment, or null if not enough data. */

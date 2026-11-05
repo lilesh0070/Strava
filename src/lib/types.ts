@@ -1,5 +1,5 @@
 import type { Point } from './geo';
-import type { KalmanState, Lap, LapMark } from './live';
+import type { DistanceState, KalmanState, Lap, LapMark } from './live';
 import type { WorkoutProgress } from './workouts';
 
 export type Sport = 'run' | 'ride' | 'walk' | 'hike';
@@ -81,6 +81,9 @@ export type Session = {
   distanceM?: number; // running total, kept incrementally
   lastCueKm?: number;
   kf?: KalmanState | null; // smoothing filter state
+  ds?: DistanceState; // distance-stage state (second smoother / anchor for phones without Doppler)
+  /** Filtered speed at the last kept point (for velocity-integrated distance). */
+  lastSpeed?: number;
   laps?: LapMark[];
   lastPaceAlertAt?: number;
   maxSpeedMs?: number;

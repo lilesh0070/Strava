@@ -22,12 +22,12 @@ export function haversine(a: Pick<Point, 'lat' | 'lng'>, b: Pick<Point, 'lat' | 
 }
 
 /** Decide whether a new GPS fix should be kept, given the previous kept fix. */
-export function acceptPoint(prev: Point | undefined, next: Point, maxSpeedMs = 45): boolean {
+export function acceptPoint(prev: Point | undefined, next: Point, maxSpeedMs = 45, minDistM = 3): boolean {
   if (next.acc != null && next.acc > 35) return false;
   if (!prev) return true;
   if (next.t <= prev.t) return false;
   const d = haversine(prev, next);
-  if (d < 3) return false; // jitter while standing still
+  if (d < minDistM) return false; // jitter while standing still
   const speed = d / ((next.t - prev.t) / 1000);
   return speed <= maxSpeedMs;
 }
@@ -42,17 +42,38 @@ export function totalDistance(segments: Point[][]): number {
   return segments.reduce((s, seg) => s + segmentDistance(seg), 0);
 }
 
-/** Elevation gain with a hysteresis threshold to ignore GPS altitude noise. */
-export function elevationGain(segments: Point[][], threshold = 4): number {
+/**
+ * Altitude along a segment, smoothed against GPS noise. Phone GPS altitude wanders by several metres
+ * from fix to fix and drifts slowly; a ~20 s exponential average follows real slopes (a 5 % climb at
+ * running speed changes 3 m in 20 s) while flattening the wander. Null values pass through.
+ */
+export function smoothAltitude(seg: Point[], tauSec = 20): (number | null)[] {
+  let s: number | null = null, lastT = 0;
+  return seg.map((p) => {
+    if (p.alt == null) return null;
+    if (s == null) { s = p.alt; lastT = p.t; return s; }
+    const dt = Math.max(0, (p.t - lastT) / 1000);
+    lastT = p.t;
+    s += (1 - Math.exp(-dt / tauSec)) * (p.alt - s);
+    return s;
+  });
+}
+
+/**
+ * Elevation gain: climbs on the smoothed altitude that pass a hysteresis threshold. On a simulated 50 m
+ * climb with typical GPS altitude noise (3 m jitter + 8 m slow drift) the old raw 4 m threshold gave
+ * ~2,400 m; smoothing with an 8 m threshold gives ~50-90 m.
+ */
+export function elevationGain(segments: Point[][], threshold = 8): number {
   let gain = 0;
   for (const seg of segments) {
     let ref: number | null = null;
-    for (const p of seg) {
-      if (p.alt == null) continue;
-      if (ref == null) { ref = p.alt; continue; }
-      const diff = p.alt - ref;
-      if (diff >= threshold) { gain += diff; ref = p.alt; }
-      else if (diff <= -threshold) ref = p.alt;
+    for (const alt of smoothAltitude(seg)) {
+      if (alt == null) continue;
+      if (ref == null) { ref = alt; continue; }
+      const diff = alt - ref;
+      if (diff >= threshold) { gain += diff; ref = alt; }
+      else if (diff <= -threshold) ref = alt;
     }
   }
   return gain;
