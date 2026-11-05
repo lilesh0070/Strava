@@ -14,6 +14,7 @@ import { refreshSettings } from '../lib/tracker';
 import type { Settings } from '../lib/types';
 import { applyOta, checkForUpdates, currentBuildId, currentVersion, installApk, useUpdateState } from '../lib/updates';
 import { useT } from '../lib/i18n';
+import { shareApp } from '../lib/shareApp';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   const { F } = useTheme();
@@ -293,6 +294,8 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title={t('set.about')}>
+        <NeuTile icon="share-variant" title={t('app.share')} subtitle={t('app.shareSub')}
+          onPress={() => shareApp(t).catch(() => undefined)} />
         <Text style={{ color: C.muted, fontSize: 11, marginLeft: 6 }}>Map data © OpenStreetMap contributors</Text>
       </Section>
     </ScrollView>

@@ -2,11 +2,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { IconWell, NeuButton, NeuCard, NeuProgress, NeuTile } from '../components/Neu';
 import type { BoardRow, FriendRequest } from '../lib/friends';
 import { friends, friendsAvailable } from '../lib/friendsApp';
 import { useT } from '../lib/i18n';
+import { shareApp } from '../lib/shareApp';
 import { useTheme } from '../lib/theme';
 
 type State = { enabled: boolean; code: string | null; board: BoardRow[]; incoming: FriendRequest[]; outgoing: FriendRequest[] };
@@ -91,7 +92,7 @@ export default function FriendsScreen() {
         <Text selectable style={{ color: C.accent, fontSize: 30, fontWeight: '900', letterSpacing: 3 }}>{st.code ?? '—'}</Text>
         {st.code && (
           <NeuButton small icon="share-variant" label={t('fr.shareId')}
-            onPress={() => Share.share({ message: `${t('fr.shareMsg')} ${st.code}` }).catch(() => undefined)} />
+            onPress={() => shareApp(t, st.code).catch(() => undefined)} />
         )}
       </NeuCard>
 
