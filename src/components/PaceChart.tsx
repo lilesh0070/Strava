@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import { Text, View } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
 import { fmtPace } from '../lib/geo';
@@ -7,9 +8,9 @@ import { useTheme } from '../lib/theme';
 import { IconWell, NeuCard } from './Neu';
 
 /** Pace (or speed) along the route. Faster is drawn higher for both. */
-export default function PaceChart({ segments, usesPace, width }: { segments: Point[][]; usesPace: boolean; width: number }) {
+function PaceChart({ segments, usesPace, width }: { segments: Point[][]; usesPace: boolean; width: number }) {
   const { C, F } = useTheme();
-  const s = speedSeries(segments);
+  const s = useMemo(() => speedSeries(segments), [segments]);
   if (s.length < 4) return null;
   const height = 110;
   const vs = s.map((p) => p.v).sort((a, b) => a - b);
@@ -39,3 +40,5 @@ export default function PaceChart({ segments, usesPace, width }: { segments: Poi
     </NeuCard>
   );
 }
+
+export default memo(PaceChart);

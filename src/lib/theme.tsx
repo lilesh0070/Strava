@@ -16,6 +16,10 @@ export type Palette = {
   route: string;
   danger: string;
   success: string;
+  /** Darker inks for small coloured text: the fills above don't reach 4.5:1 on the light background. */
+  accentInk: string;
+  successInk: string;
+  warnInk: string;
   hi: string; // highlight shadow
   lo: string; // dark shadow
 };
@@ -31,6 +35,9 @@ const light: Palette = {
   route: '#F2762E',
   danger: '#E5484D',
   success: '#30A46C',
+  accentInk: '#B5490F', // 4.6:1 on bg
+  successInk: '#1F7A4C',
+  warnInk: '#9A5B00',
   hi: '#FFFFFF',
   lo: '#C3CBD8',
 };
@@ -46,6 +53,9 @@ const dark: Palette = {
   route: '#FF8A47',
   danger: '#FF6369',
   success: '#4CC38A',
+  accentInk: '#FF8A47', // the fills already pass on the dark background
+  successInk: '#4CC38A',
+  warnInk: '#F5A524',
   hi: '#323741',
   lo: '#181B20',
 };

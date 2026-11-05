@@ -36,8 +36,8 @@ export default function DetailsCard({ a, onChange }: { a: Activity; onChange: (n
         <View style={{ flexDirection: 'row', gap: 4, padding: 5, borderRadius: 16, backgroundColor: C.bg, boxShadow: S.insetSm }}>
           {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
             <Pressable key={n} onPress={() => onChange({ ...a, effort: a.effort === n ? undefined : n })}
-              accessibilityLabel={`Effort ${n}`}
-              style={{ flex: 1, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+              accessibilityRole="radio" accessibilityState={{ selected: a.effort === n }} accessibilityLabel={`Effort ${n}`} hitSlop={{ top: 8, bottom: 8 }}
+              style={{ flex: 1, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
                 backgroundColor: a.effort && n <= a.effort ? C.accent : C.bg }}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: a.effort && n <= a.effort ? C.accentText : C.muted }}>{n}</Text>
             </Pressable>

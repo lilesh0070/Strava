@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed } from '../lib/geo';
 import { activitySteps, fmtSteps } from '../lib/steps';
+import { useT } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 import { sportInfo, type Activity } from '../lib/types';
 import { IconWell, NeuCard, NeuIconButton } from './Neu';
@@ -19,6 +20,7 @@ export function fmtDate(t: number) {
 function ActivityCard({ a }: { a: Activity }) {
   const { width } = useWindowDimensions();
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const info = sportInfo(a.sport);
   const steps = activitySteps(a);
   return (
@@ -37,22 +39,22 @@ function ActivityCard({ a }: { a: Activity }) {
           <Text style={[F.h2, { fontSize: 17 }]} numberOfLines={1}>{a.name}</Text>
           <Text style={{ color: C.muted, fontSize: 13 }}>{fmtDate(a.startedAt)}</Text>
         </View>
-        <NeuIconButton icon="share-variant" size={40} color={C.accent} accessibilityLabel={`Share ${a.name}`}
+        <NeuIconButton icon="share-variant" size={40} color={C.accentInk} accessibilityLabel={`${t('card.share')} ${a.name}`}
           onPress={() => router.push(`/share/${a.id}`)} />
       </View>
       {a.description ? <Text style={{ color: C.text, marginBottom: 12 }} numberOfLines={3}>{a.description}</Text> : null}
       <View style={{ flexDirection: 'row', marginBottom: 14 }}>
-        <Stat label="Distance" value={fmtKm(a.distanceM)} unit="km" />
+        <Stat label={t('card.distance')} value={fmtKm(a.distanceM)} unit="km" />
         {info.usesPace
-          ? <Stat label="Pace" value={fmtPace(a.distanceM, a.movingSec)} unit="/km" />
-          : <Stat label="Speed" value={fmtSpeed(a.distanceM, a.movingSec)} unit="km/h" />}
-        <Stat label="Time" value={fmtDuration(a.movingSec)} />
+          ? <Stat label={t('card.pace')} value={fmtPace(a.distanceM, a.movingSec)} unit="/km" />
+          : <Stat label={t('card.speed')} value={fmtSpeed(a.distanceM, a.movingSec)} unit="km/h" />}
+        <Stat label={t('card.time')} value={fmtDuration(a.movingSec)} />
       </View>
       {steps ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -4, marginBottom: 12 }}>
           <MaterialCommunityIcons name="shoe-print" size={16} color={C.muted} />
           <Text style={{ color: C.muted, fontSize: 13, fontWeight: '600' }}>
-            {steps.estimated ? '≈' : ''}{fmtSteps(steps.steps)} steps
+            {steps.estimated ? '≈' : ''}{fmtSteps(steps.steps)} {t('card.steps')}
           </Text>
         </View>
       ) : null}

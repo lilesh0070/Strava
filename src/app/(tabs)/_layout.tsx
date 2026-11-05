@@ -20,6 +20,7 @@ export default function TabsLayout() {
     <Tabs
       tabBar={(props) => <NeuTabBar {...props} />}
       screenOptions={{
+        animation: 'shift',
         headerStyle: { backgroundColor: C.bg },
         headerShadowVisible: false,
         headerTintColor: C.text,

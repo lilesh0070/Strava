@@ -4,7 +4,7 @@
 // Battery: during a recording only the *new* points and the current position cross the bridge
 // (window.append), instead of re-sending and redrawing the whole route every second. A full
 // redraw (window.reset) happens only when the data set itself changes or the page (re)loads.
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Linking, View, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView as RNWebView, type WebViewProps } from 'react-native-webview';
 import type { Point } from '../lib/geo';
@@ -25,6 +25,13 @@ type Props = {
   paused?: boolean;
   /** Change this (e.g. a filter value) to re-frame the map around the new routes. */
   fitKey?: string;
+};
+
+/** Links (e.g. the OSM attribution) open in the browser instead of replacing the map. */
+const onNavigate = (req: { url: string }) => {
+  if (req.url.startsWith('https://localhost') || req.url.startsWith('about:') || req.url.startsWith('data:')) return true;
+  Linking.openURL(req.url).catch(() => undefined);
+  return false;
 };
 
 const buildHtml = (C: Palette) => `<!DOCTYPE html><html><head>
@@ -65,7 +72,7 @@ window.append=function(d){
 window.update=window.reset;
 </script></body></html>`;
 
-export default function RouteMap({ segments, current, follow = false, style, interactive = true, paused = false, fitKey }: Props) {
+function RouteMap({ segments, current, follow = false, style, interactive = true, paused = false, fitKey }: Props) {
   const { C } = useTheme();
   const ref = useRef<WebViewHandle>(null);
   const html = useMemo(() => buildHtml(C), [C]);
@@ -87,6 +94,10 @@ export default function RouteMap({ segments, current, follow = false, style, int
   };
   // Runs after every render but only compares lengths; segments grow in place while recording.
   useEffect(() => { sync(false); });
+  const syncRef = useRef(sync);
+  useEffect(() => { syncRef.current = sync; });
+  const onLoadEnd = useCallback(() => { ready.current = true; syncRef.current(true); }, []);
+  const webStyle = useMemo(() => ({ backgroundColor: C.bg }), [C.bg]);
 
   return (
     <View style={[{ overflow: 'hidden', backgroundColor: C.bg }, style]} pointerEvents={interactive ? 'auto' : 'none'}>
@@ -96,16 +107,18 @@ export default function RouteMap({ segments, current, follow = false, style, int
         originWhitelist={['*']}
         source={source}
         // links (e.g. the OSM attribution) open in the browser instead of replacing the map
-        onShouldStartLoadWithRequest={(req) => {
-          if (req.url.startsWith('https://localhost') || req.url.startsWith('about:') || req.url.startsWith('data:')) return true;
-          Linking.openURL(req.url).catch(() => undefined);
-          return false;
-        }}
-        onLoadEnd={() => { ready.current = true; sync(true); }}
-        style={{ backgroundColor: C.bg }}
+        onShouldStartLoadWithRequest={onNavigate}
+        onLoadEnd={onLoadEnd}
+        style={webStyle}
         scrollEnabled={false}
         javaScriptEnabled
       />
     </View>
   );
 }
+
+const sameLatLng = (a?: Point | null, b?: Point | null) => (!a && !b) || (!!a && !!b && a.lat === b.lat && a.lng === b.lng);
+/** The Record screen re-renders every second; the map only needs to know when its inputs really change. */
+export default memo(RouteMap, (p, n) =>
+  p.segments === n.segments && p.follow === n.follow && p.paused === n.paused && p.fitKey === n.fitKey
+  && p.style === n.style && p.interactive === n.interactive && sameLatLng(p.current, n.current));

@@ -545,6 +545,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
     const created = await locked(async () => {
       await load();
       if (session) return false; // already recording
+      discarded = null; // a new recording makes the old discarded one unrecoverable
       const now = Date.now();
       // begin exactly where you stand, but only from a fresh, accurate fix
       // (arrived in the last 3 s and is itself recent: not an old cached fix handed over when GPS started;
@@ -609,13 +610,37 @@ export function resume() {
   });
 }
 
+/** The last discarded recording, kept in memory for a short while so a mistaken tap can be undone. */
+let discarded: { session: Session; at: number } | null = null;
+export const UNDO_DISCARD_MS = 15_000;
+
 export async function discard() {
   Speech.stop();
   stopSteps();
   await stopUpdates();
-  await locked(async () => { session = null; await persist(); });
+  await locked(async () => {
+    if (session) discarded = { session: { ...session, status: 'paused', pauseStartedAt: session.pauseStartedAt ?? Date.now() }, at: Date.now() };
+    session = null;
+    await persist();
+  });
   syncWarm();
   notify();
+}
+
+/** Bring back the recording discarded a moment ago (paused). Returns false if there is nothing to restore. */
+export async function undoDiscard(): Promise<boolean> {
+  const d = discarded;
+  if (!d || Date.now() - d.at > UNDO_DISCARD_MS) return false;
+  discarded = null;
+  const ok = await locked(async () => {
+    await load();
+    if (session) return false; // a new recording has started meanwhile
+    session = d.session;
+    await persist();
+    return true;
+  });
+  if (ok) { startSteps(); syncWarm(); notify(); }
+  return ok;
 }
 
 export async function finish(): Promise<Activity | null> {
@@ -653,6 +678,7 @@ export async function finish(): Promise<Activity | null> {
     // the recording stays (paused) so nothing is lost and Save can simply be tried again.
     try {
       await saveActivity(a);
+      discarded = null;
     } catch (e) {
       if (s.status === 'recording') { s.status = 'paused'; s.autoPaused = false; s.pauseStartedAt = now; }
       await persist().catch(() => undefined);

@@ -9,7 +9,7 @@ import CrashScreen from '../components/CrashScreen';
 import { ensureReminders } from '../lib/reminders';
 import ToastHost from '../components/ToastHost';
 import UpdateBanner from '../components/UpdateBanner';
-import { I18nProvider } from '../lib/i18n';
+import { I18nProvider, useT } from '../lib/i18n';
 import { ThemeProvider, useTheme } from '../lib/theme';
 
 // Show break reminders even while the app is open (quietly: no sound on top of a banner).
@@ -37,6 +37,7 @@ function NotificationLinks() {
 
 function Root() {
   const { C } = useTheme();
+  const { t } = useT();
   // pick up a recording the OS interrupted and restart its GPS right away, not when Record is first opened
   useEffect(() => { restore().catch(() => undefined); }, []);
   useEffect(() => { startFriendsSync(); }, []);
@@ -54,15 +55,15 @@ function Root() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="activity/[id]" options={{ title: 'Activity' }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-        <Stack.Screen name="add-activity" options={{ title: 'Add activity', presentation: 'modal' }} />
-        <Stack.Screen name="heatmap" options={{ title: 'Your heatmap' }} />
-        <Stack.Screen name="achievements" options={{ title: 'Achievements' }} />
-        <Stack.Screen name="workouts" options={{ title: 'Interval workouts' }} />
-        <Stack.Screen name="friends" options={{ title: 'Friends' }} />
+        <Stack.Screen name="activity/[id]" options={{ title: t('hdr.activity') }} />
+        <Stack.Screen name="settings" options={{ title: t('hdr.settings') }} />
+        <Stack.Screen name="add-activity" options={{ title: t('hdr.add'), presentation: 'modal' }} />
+        <Stack.Screen name="heatmap" options={{ title: t('hdr.heatmap') }} />
+        <Stack.Screen name="achievements" options={{ title: t('hdr.achievements') }} />
+        <Stack.Screen name="workouts" options={{ title: t('hdr.workouts') }} />
+        <Stack.Screen name="friends" options={{ title: t('hdr.friends') }} />
         <Stack.Screen name="break" options={{ title: '' }} />
-        <Stack.Screen name="share/[id]" options={{ title: 'Share' }} />
+        <Stack.Screen name="share/[id]" options={{ title: t('hdr.share') }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
       </Stack>
       <UpdateBanner />

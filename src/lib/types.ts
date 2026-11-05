@@ -57,6 +57,7 @@ export type Settings = {
   reminder: boolean;
   reminderHour: number;
   language: 'en' | 'hi';
+  lastSport?: Sport; // the sport picked last time on Record / Add activity
   // workday wellness: stretch / water / eye-break nudges during work hours
   breakReminders: boolean;
   breakEveryMin: number; // 45 | 60 | 90 | 120

@@ -17,7 +17,7 @@ import { getProfile, onDataChanged, updateProfile, type Profile } from '../../li
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
-import { useT } from '../../lib/i18n';
+import { sportName, useT } from '../../lib/i18n';
 
 /** Monday `k` weeks before `monday`, by calendar date so DST changes don't shift the buckets. */
 function weeksBefore(monday: number, k: number) {
@@ -122,19 +122,19 @@ export default function ProfileScreen() {
           <Text style={{ fontSize: 28, fontWeight: '900', color: C.accentText }}>{(profile?.name || 'A')[0].toUpperCase()}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <TextInput value={profile?.name ?? ''} onChangeText={(name) => update({ name })} placeholder="Your name"
-            placeholderTextColor={C.muted} style={[F.h1, { fontSize: 24, padding: 0 }]} accessibilityLabel="Your name" />
-          <TextInput value={profile?.team ?? ''} onChangeText={(team) => update({ team })} placeholder="Team / department"
+          <TextInput value={profile?.name ?? ''} onChangeText={(name) => update({ name })} placeholder={t('you.name')}
+            placeholderTextColor={C.muted} style={[F.h1, { fontSize: 24, padding: 0 }]} accessibilityLabel={t('you.name')} />
+          <TextInput value={profile?.team ?? ''} onChangeText={(team) => update({ team })} placeholder={t('you.team')}
             placeholderTextColor={C.muted} style={{ color: C.text, fontSize: 14, fontWeight: '600', padding: 0 }}
-            accessibilityLabel="Team or department" />
-          <Text style={{ color: C.muted, fontSize: 13 }}>{(items ?? []).length} activities recorded</Text>
+            accessibilityLabel={t('you.team')} />
+          <Text style={{ color: C.muted, fontSize: 13 }}>{(items ?? []).length} {t('you.recorded')}</Text>
         </View>
       </NeuCard>
 
       <View style={{ flexDirection: 'row', gap: 16 }}>
-        <NeuTile icon="trophy-variant-outline" title="Badges" subtitle={`${badgesEarned} earned`}
+        <NeuTile icon="trophy-variant-outline" title={t('you.badges')} subtitle={`${badgesEarned} ${t('you.earned')}`}
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/achievements')} />
-        <NeuTile icon="map-legend" title="Heatmap" subtitle="All routes"
+        <NeuTile icon="map-legend" title={t('you.heatmap')} subtitle={t('you.allRoutes')}
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/heatmap')} />
       </View>
       <NeuTile icon="account-group-outline" title={t('fr.leaderboard')} subtitle={t('fr.leaderboardSub')} onPress={() => router.push('/friends')} />
@@ -143,10 +143,10 @@ export default function ProfileScreen() {
         <GoalRing value={profile?.monthlyGoalKm ? monthKm(items ?? []) / profile.monthlyGoalKm : 0}
           label={`${monthKm(items ?? []).toFixed(0)}`} sub={`of ${profile?.monthlyGoalKm ?? 0} km`} />
         <View style={{ flex: 1, gap: 8 }}>
-          <Text style={F.h2}>{new Date().toLocaleDateString(undefined, { month: 'long' })} goal</Text>
-          <Text style={{ color: C.muted, fontSize: 12 }}>All sports combined</Text>
+          <Text style={F.h2}>{new Date().toLocaleDateString(undefined, { month: 'long' })} {t('you.goal')}</Text>
+          <Text style={{ color: C.muted, fontSize: 12 }}>{t('you.allSports')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <NumberField value={profile?.monthlyGoalKm} label="Monthly goal in kilometres"
+            <NumberField value={profile?.monthlyGoalKm} label={t('you.monthlyGoalA11y')}
               onChange={(monthlyGoalKm) => update({ monthlyGoalKm })}
               style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 12,
                 paddingVertical: 6, minWidth: 64, textAlign: 'center', fontWeight: '700' }} />
@@ -160,7 +160,7 @@ export default function ProfileScreen() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }}
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 8, gap: 12 }}>
         {SPORTS.map((s) => (
-          <NeuButton key={s.key} small icon={s.icon as never} label={s.label} selected={filter === s.key} onPress={() => setFilter(s.key)} />
+          <NeuButton key={s.key} small icon={s.icon as never} label={sportName(t, s.key)} selected={filter === s.key} onPress={() => setFilter(s.key)} />
         ))}
       </ScrollView>
 
@@ -168,8 +168,8 @@ export default function ProfileScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <IconWell icon="chart-bar" />
           <View style={{ flex: 1 }}>
-            <Text style={F.h2}>Last 8 weeks</Text>
-            <Text style={{ color: C.muted, fontSize: 13 }}>{thisWeekKm.toFixed(1)} of {goal} km this week</Text>
+            <Text style={F.h2}>{t('you.last8')}</Text>
+            <Text style={{ color: C.muted, fontSize: 13 }}>{thisWeekKm.toFixed(1)} {t('you.ofThisWeek')} {goal} {t('you.kmThisWeek')}</Text>
           </View>
         </View>
         <NeuProgress value={goal ? thisWeekKm / goal : 0} />
@@ -190,8 +190,8 @@ export default function ProfileScreen() {
           })}
         </Svg>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Text style={{ color: C.muted, flex: 1 }}>Weekly goal (km)</Text>
-          <NumberField value={profile?.weeklyGoalKm} label="Weekly goal in kilometres"
+          <Text style={{ color: C.muted, flex: 1 }}>{t('you.weeklyGoal')}</Text>
+          <NumberField value={profile?.weeklyGoalKm} label={t('you.weeklyGoalA11y')}
             onChange={(weeklyGoalKm) => update({ weeklyGoalKm })}
             style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 14,
               paddingVertical: 8, minWidth: 70, textAlign: 'center', fontWeight: '700' }} />
@@ -201,24 +201,24 @@ export default function ProfileScreen() {
       <NeuCard radius={28} style={{ gap: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <IconWell icon="trophy-outline" />
-          <Text style={F.h2}>All-time</Text>
+          <Text style={F.h2}>{t('you.allTime')}</Text>
         </View>
         <View style={{ flexDirection: 'row' }}>
-          <Stat label="Activities" value={String(totals.count)} />
-          <Stat label="Distance" value={fmtKm(totals.dist)} unit="km" />
+          <Stat label={t('you.activities')} value={String(totals.count)} />
+          <Stat label={t('you.distance')} value={fmtKm(totals.dist)} unit="km" />
         </View>
         <View style={{ flexDirection: 'row' }}>
-          <Stat label="Time" value={fmtDuration(totals.time)} />
-          <Stat label="Elev gain" value={String(totals.elev)} unit="m" />
+          <Stat label={t('you.time')} value={fmtDuration(totals.time)} />
+          <Stat label={t('you.elev')} value={String(totals.elev)} unit="m" />
         </View>
-        <Stat label="Longest" value={fmtKm(totals.longest)} unit="km" />
+        <Stat label={t('you.longest')} value={fmtKm(totals.longest)} unit="km" />
       </NeuCard>
 
       {records.length > 0 && (
         <NeuCard radius={28} style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <IconWell icon="medal-outline" />
-            <Text style={F.h2}>Best efforts</Text>
+            <Text style={F.h2}>{t('you.bestEfforts')}</Text>
           </View>
           {records.map((r) => (
             <NeuCard key={r.label} inset radius={18} padding={12} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -235,10 +235,10 @@ export default function ProfileScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <IconWell icon="scale-bathroom" />
           <View style={{ flex: 1 }}>
-            <Text style={F.h2}>Body weight</Text>
-            <Text style={{ color: C.muted, fontSize: 12 }}>Used only to estimate calories, stays on this phone</Text>
+            <Text style={F.h2}>{t('you.weight')}</Text>
+            <Text style={{ color: C.muted, fontSize: 12 }}>{t('you.weightSub')}</Text>
           </View>
-          <NumberField value={profile?.weightKg} label="Body weight in kilograms" max={300}
+          <NumberField value={profile?.weightKg} label={t('you.weightA11y')} max={300}
             onChange={(weightKg) => update({ weightKg })}
             style={{ color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 14, paddingHorizontal: 12,
               paddingVertical: 8, minWidth: 64, textAlign: 'center', fontWeight: '700' }} />

@@ -1,17 +1,21 @@
 // Log an activity by hand: treadmill, gym bike, or a run the phone didn't record.
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, View } from 'react-native';
 import { NeuButton, NeuCard, NeuIconButton } from '../components/Neu';
 import { autoSync } from '../lib/githubSync';
 import { parseDuration } from '../lib/parse';
-import { defaultGear, saveActivity } from '../lib/storage';
+import { defaultGear, getSettings, saveActivity, updateSettings } from '../lib/storage';
+import { sportName, useT } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 import { defaultName, gearKindFor, newActivityId, SPORTS, type Activity, type Sport } from '../lib/types';
 
 export default function AddActivity() {
   const { C, S, F } = useTheme();
-  const [sport, setSport] = useState<Sport>('run');
+  const { t } = useT();
+  const [sport, setSportState] = useState<Sport>('run');
+  useEffect(() => { getSettings().then((s) => { if (s.lastSport) setSportState(s.lastSport); }).catch(() => undefined); }, []);
+  const setSport = (s: Sport) => { setSportState(s); updateSettings({ lastSport: s }).catch(() => undefined); };
   const [daysAgo, setDaysAgo] = useState(0);
   const [dist, setDist] = useState('');
   const [dur, setDur] = useState('');
@@ -28,15 +32,15 @@ export default function AddActivity() {
     busy.current = true;
     setSaving(true);
     try { await saveEntry(); }
-    catch (e) { Alert.alert('Could not save', String((e as Error)?.message ?? e)); } // the form stays filled in
+    catch (e) { Alert.alert(t('add.couldNotSave'), String((e as Error)?.message ?? e)); } // the form stays filled in
     finally { busy.current = false; setSaving(false); }
   };
 
   const saveEntry = async () => {
     const km = Number(dist.replace(',', '.'));
     const sec = parseDuration(dur);
-    if (!Number.isFinite(km) || km < 0 || km > 1000) return Alert.alert('Check distance', 'Enter kilometres, e.g. 5.2');
-    if (!sec) return Alert.alert('Check duration', 'Enter minutes (45), mm:ss (32:10) or h:mm:ss (1:05:30)');
+    if (!Number.isFinite(km) || km < 0 || km > 1000) return Alert.alert(t('add.checkDist'), t('add.checkDistBody'));
+    if (!sec) return Alert.alert(t('add.checkDur'), t('add.checkDurBody'));
     const startedAt = new Date(day); startedAt.setHours(new Date().getHours(), new Date().getMinutes(), 0, 0);
     startedAt.setTime(startedAt.getTime() - sec * 1000);
     const gear = await defaultGear(gearKindFor(sport)).catch(() => undefined);
@@ -58,8 +62,8 @@ export default function AddActivity() {
         {SPORTS.map((s) => (
           <View key={s.key} style={{ alignItems: 'center', gap: 8 }}>
             <NeuIconButton icon={s.icon as never} size={58} color={sport === s.key ? C.accent : C.muted}
-              accessibilityLabel={s.label} onPress={() => setSport(s.key)} />
-            <Text style={{ color: sport === s.key ? C.accent : C.muted, fontWeight: '700', fontSize: 13 }}>{s.label}</Text>
+              accessibilityLabel={sportName(t, s.key)} selected={sport === s.key} onPress={() => setSport(s.key)} />
+            <Text style={{ color: sport === s.key ? C.accentInk : C.muted, fontWeight: '700', fontSize: 13 }}>{sportName(t, s.key)}</Text>
           </View>
         ))}
       </View>

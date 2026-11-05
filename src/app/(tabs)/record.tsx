@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Alert, AppState, Linking, Pressable, Text, View } from 'react-native';
+import { Alert, Animated, AppState, LayoutAnimation, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
@@ -13,13 +13,14 @@ import { fmtSteps, isOnFoot } from '../../lib/steps';
 import { gpsHealth } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
 import { newRecords } from '../../lib/records';
-import { getSettings, listActivities } from '../../lib/storage';
+import { getSettings, listActivities, updateSettings } from '../../lib/storage';
+import { showToast } from '../../lib/toast';
 import { useSelectedWorkout } from '../../lib/workoutSelection';
 import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
 import { SPORTS, sessionMovingSec, sportInfo, workoutSec, type Sport } from '../../lib/types';
-import { useT } from '../../lib/i18n';
+import { sportName, useT } from '../../lib/i18n';
 
 // Snapshot changes identity on every tracker notification so React re-renders.
 let version = 0;
@@ -32,14 +33,53 @@ const useTracker = () => {
 function KeepAwake() { useKeepAwake(); return null; }
 /** Stable empty route, so the map doesn't redraw every second before Start. */
 const NO_SEGMENTS: never[] = [];
+const MAP_STYLE = { flex: 1, borderRadius: 26 } as const;
+/** Animate the next layout change (picker ↔ countdown ↔ live stats) instead of snapping. */
+const ease = () => LayoutAnimation.configureNext(LayoutAnimation.create(260, 'easeInEaseOut', 'opacity'));
+
+/** The 3-2-1 digit: each new number springs in. */
+function CountdownDigit({ n, color }: { n: number; color: string }) {
+  const [scale] = useState(() => new Animated.Value(1.5));
+  const [opacity] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    scale.setValue(1.5); opacity.setValue(0);
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5, tension: 120 }),
+      Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }),
+    ]).start();
+  }, [n, scale, opacity]);
+  return (
+    <Animated.Text style={{ fontSize: 60, fontWeight: '900', color, transform: [{ scale }], opacity }} maxFontSizeMultiplier={1.2}>{n}</Animated.Text>
+  );
+}
+
+/** Soft pulsing ring behind Start while GPS is ready. */
+function ReadyGlow({ on, color, size }: { on: boolean; color: string; size: number }) {
+  const [o] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    if (!on) { Animated.timing(o, { toValue: 0, duration: 300, useNativeDriver: true }).start(); return; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(o, { toValue: 0.35, duration: 900, useNativeDriver: true }),
+      Animated.timing(o, { toValue: 0.12, duration: 900, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [on, o]);
+  return <Animated.View pointerEvents="none" style={{ position: 'absolute', width: size + 22, height: size + 22, borderRadius: (size + 22) / 2, backgroundColor: color, opacity: o }} />;
+}
 
 export default function Record() {
   const { C, S, F } = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
   const { session, fix } = useTracker();
-  const [sport, setSport] = useState<Sport>('run');
+  const [sport, setSportState] = useState<Sport>('run');
+  // the sport picked last time is remembered, so Start is one tap after opening the tab
+  useEffect(() => { getSettings().then((s) => { if (s.lastSport) setSportState(s.lastSport); }).catch(() => undefined); }, []);
+  const setSport = (s: Sport) => { setSportState(s); updateSettings({ lastSport: s }).catch(() => undefined); };
   const [now, setNow] = useState(Date.now);
+  /** What the screen is busy with: the buttons show it instead of looking frozen. */
+  const [phase, setPhase] = useState<'idle' | 'preparing' | 'saving'>('idle');
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
   const [precision, setPrecision] = useState<tracker.Precision>('precise');
   const [focused, setFocused] = useState(true);
@@ -100,7 +140,8 @@ export default function Record() {
 
   const begin = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    try { await tracker.start(sport, selectedWorkout); } finally { starting.current = false; }
+    ease();
+    try { await tracker.start(sport, selectedWorkout); } finally { starting.current = false; setPhase('idle'); }
   };
 
   /** Ask for precise location / location on. Resolves true when recording may go ahead. */
@@ -122,13 +163,16 @@ export default function Record() {
   const onStart = async () => {
     if (starting.current) return; // ignore double taps (and a second countdown)
     starting.current = true;
+    setPhase('preparing');
     let countdownOn: boolean;
     try {
-      if (!(await prepareStart())) { starting.current = false; return; }
+      if (!(await prepareStart())) { starting.current = false; setPhase('idle'); return; }
       countdownOn = (await getSettings()).countdown;
-    } catch { starting.current = false; return; }
+    } catch { starting.current = false; setPhase('idle'); return; }
     if (!countdownOn) return begin();
+    setPhase('idle');
     let n = 3;
+    ease();
     setCountdown(n);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
     cdTimer.current = setInterval(() => {
@@ -136,6 +180,7 @@ export default function Record() {
       if (n <= 0) {
         if (cdTimer.current) clearInterval(cdTimer.current);
         cdTimer.current = null;
+        ease();
         setCountdown(null);
         begin();
       } else {
@@ -152,8 +197,8 @@ export default function Record() {
     let p = perm;
     if (p !== 'background') { p = await tracker.ensurePermissions(true); setPerm(p); }
     if (p === 'denied') {
-      Alert.alert('Location needed', 'Allow location access in Settings to record activities.', [
-        { text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      Alert.alert(t('rec.locNeededTitle'), t('rec.locNeededBody'), [
+        { text: t('rec.cancel'), style: 'cancel' }, { text: t('rec.openSettings'), onPress: () => Linking.openSettings() },
       ]);
       return false;
     }
@@ -175,35 +220,47 @@ export default function Record() {
   const cancelCountdown = () => {
     if (cdTimer.current) clearInterval(cdTimer.current);
     cdTimer.current = null;
+    ease();
     setCountdown(null);
     starting.current = false;
   };
 
+  /** Throw the recording away, with a few seconds to change your mind. */
+  const discard = async () => {
+    ease();
+    await tracker.discard();
+    showToast(t('rec.discarded'), { label: t('toast.undo'), run: () => { ease(); tracker.undoDiscard().catch(() => undefined); } }, tracker.UNDO_DISCARD_MS);
+  };
+
+  const save = async () => {
+    if (phase !== 'idle') return;
+    setPhase('saving');
+    const before = await listActivities().catch(() => []);
+    let a;
+    try { a = await tracker.finish(); }
+    catch (e) {
+      setPhase('idle');
+      // the recording is kept (paused), so the user can try again
+      Alert.alert(t('rec.saveFailed'), `${t('rec.saveFailedBody')}\n\n${String((e as Error)?.message ?? e)}`);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    ease();
+    setPhase('idle');
+    if (!a) return;
+    router.push(`/activity/${a.id}`);
+    const lines = [
+      ...newRecords(before, a).map((r) => `🏆 ${t('rec.newPr')}: ${r.label}${r.kind === 'effort' ? ` — ${fmtDuration(r.value)}` : ''}`),
+      ...newlyEarned(before, a).map((b) => `🏅 ${t('rec.badge')}: ${b.title}`),
+    ];
+    if (lines.length) Alert.alert(t('rec.nice'), lines.join('\n'));
+  };
+
   const onFinish = () => {
     Alert.alert(t('rec.finishQ'), undefined, [
-      { text: t('rec.resume'), style: 'cancel', onPress: () => { tracker.resume(); } },
-      { text: t('rec.discard'), style: 'destructive', onPress: () => tracker.discard() },
-      {
-        text: t('rec.save'),
-        onPress: async () => {
-          const before = await listActivities().catch(() => []);
-          let a;
-          try { a = await tracker.finish(); }
-          catch (e) {
-            // the recording is kept (paused), so the user can try again
-            Alert.alert(t('rec.saveFailed'), `${t('rec.saveFailedBody')}\n\n${String((e as Error)?.message ?? e)}`);
-            return;
-          }
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-          if (!a) return;
-          router.push(`/activity/${a.id}`);
-          const lines = [
-            ...newRecords(before, a).map((r) => `🏆 New PR: ${r.label}${r.kind === 'effort' ? ` — ${fmtDuration(r.value)}` : ''}`),
-            ...newlyEarned(before, a).map((b) => `🏅 Badge: ${b.title}`),
-          ];
-          if (lines.length) Alert.alert(t('rec.nice'), lines.join('\n'));
-        },
-      },
+      { text: t('rec.resume'), style: 'cancel', onPress: () => { ease(); tracker.resume(); } },
+      { text: t('rec.discard'), style: 'destructive', onPress: discard },
+      { text: t('rec.save'), onPress: save },
     ]);
   };
 
@@ -217,7 +274,7 @@ export default function Record() {
       {active?.status === 'recording' && <KeepAwake />}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={{ flex: 1, borderRadius: 26 }} />
+        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE} />
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Pressable disabled={precision === 'precise'} onPress={fixPrecision} accessibilityRole="button">
             {pill(<>
@@ -246,7 +303,7 @@ export default function Record() {
           <View style={{ alignItems: 'center', gap: 16, paddingVertical: 6 }}>
             <View style={{ width: 120, height: 120, borderRadius: 60, alignItems: 'center', justifyContent: 'center',
               backgroundColor: C.bg, boxShadow: S.inset }}>
-              <Text style={{ fontSize: 60, fontWeight: '900', color: C.accent }}>{countdown}</Text>
+              <CountdownDigit n={countdown} color={C.accentInk} />
             </View>
             <NeuButton small label={t('rec.cancel')} onPress={cancelCountdown} />
           </View>
@@ -278,39 +335,52 @@ export default function Record() {
             {(() => {
               const w = findWorkout(active.workout?.workoutId);
               if (!w || !active.workout) return null;
-              if (active.workout.done) return <Text style={{ color: C.success, textAlign: 'center', fontWeight: '800' }}>Workout complete ✓</Text>;
+              if (active.workout.done) return <Text style={{ color: C.successInk, textAlign: 'center', fontWeight: '800' }}>{t('rec.workoutDone')}</Text>;
               const step = w.steps[active.workout.index];
               const left = remaining(w, active.workout, active.distanceM ?? 0, workoutSec(active, now));
               return (
                 <NeuCard inset radius={20} padding={12} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ color: step.kind === 'work' ? C.accent : C.muted, fontWeight: '800' }}>
+                  <Text style={{ color: step.kind === 'work' ? C.accentInk : C.muted, fontWeight: '800' }}>
                     {stepLabel(step)} · {active.workout.index + 1}/{w.steps.length}
                   </Text>
                   <Text style={{ color: C.text, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
-                    {step.by === 'distance' ? `${Math.round(left)} m left` : `${fmtDuration(left)} left`}
+                    {step.by === 'distance' ? `${Math.round(left)} m ${t('rec.left')}` : `${fmtDuration(left)} ${t('rec.left')}`}
                   </Text>
                 </NeuCard>
               );
             })()}
             {active.status === 'paused' && (
-              <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '800' }}>
+              <Text style={{ color: C.accentInk, textAlign: 'center', fontWeight: '800' }}>
                 {active.autoPaused ? t('rec.autoPaused') : t('rec.paused')}
               </Text>
             )}
-            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 28 }}>
-              {active.status === 'recording' ? (
-                <>
-                  <NeuIconButton icon="flag-outline" size={60} color={C.accent} accessibilityLabel="New lap" onPress={() => tracker.lap()} />
-                  <NeuIconButton icon="pause" size={80} accent accessibilityLabel="Pause" onPress={() => tracker.pause()} />
-                  <View style={{ width: 60 }} />
-                </>
-              ) : (
-                <>
-                  <NeuIconButton icon="play" size={80} accent accessibilityLabel="Resume" onPress={() => tracker.resume()} />
-                  <NeuIconButton icon="flag-checkered" size={64} color={C.accent} accessibilityLabel="Finish" onPress={onFinish} />
-                </>
-              )}
-            </View>
+            {phase === 'saving' ? (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12, paddingVertical: 14 }}>
+                <NeuIconButton icon="content-save" size={64} accent busy accessibilityLabel={t('rec.saving')} />
+                <Text style={{ color: C.muted, fontWeight: '700' }}>{t('rec.saving')}</Text>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 28 }}>
+                {active.status === 'recording' ? (
+                  <>
+                    <NeuIconButton icon="flag-outline" size={60} color={C.accentInk} accessibilityLabel={t('rec.newLap')}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined); tracker.lap(); }} />
+                    <NeuIconButton icon="pause" size={80} accent accessibilityLabel={t('rec.pause')}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined); ease(); tracker.pause(); }} />
+                    {/* Finish is always visible; a hold protects it from a mid-stride tap */}
+                    <NeuIconButton icon="flag-checkered" size={60} color={C.accentInk} accessibilityLabel={t('rec.finish')} accessibilityHint={t('rec.holdToFinish')}
+                      delayLongPress={600} onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => undefined); onFinish(); }}
+                      onPress={() => showToast(t('rec.holdToFinish'), undefined, 2500)} />
+                  </>
+                ) : (
+                  <>
+                    <NeuIconButton icon="play" size={80} accent accessibilityLabel={t('rec.resume')}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined); ease(); tracker.resume(); }} />
+                    <NeuIconButton icon="flag-checkered" size={64} color={C.accentInk} accessibilityLabel={t('rec.finish')} onPress={onFinish} />
+                  </>
+                )}
+              </View>
+            )}
           </>
         ) : (
           <>
@@ -320,17 +390,19 @@ export default function Record() {
                 const sel = s.key === sport;
                 return (
                   <View key={s.key} style={{ alignItems: 'center', gap: 8 }}>
-                    <NeuIconButton icon={s.icon as never} size={58} color={sel ? C.accent : C.muted}
-                      accessibilityLabel={s.label} onPress={() => setSport(s.key)} />
-                    <Text style={{ color: sel ? C.accent : C.muted, fontWeight: sel ? '800' : '600', fontSize: 13 }}>{s.label}</Text>
+                    <NeuIconButton icon={s.icon as never} size={58} color={sel ? C.accentInk : C.muted} selected={sel}
+                      accessibilityLabel={sportName(t, s.key)} disabled={phase === 'preparing'} onPress={() => setSport(s.key)} />
+                    <Text style={{ color: sel ? C.accentInk : C.muted, fontWeight: sel ? '800' : '600', fontSize: 13 }} maxFontSizeMultiplier={1.3}>{sportName(t, s.key)}</Text>
                   </View>
                 );
               })}
             </View>
             <NeuButton small icon="timer-outline" label={findWorkout(selectedWorkout)?.name ?? t('rec.free')}
               selected={!!selectedWorkout} onPress={() => router.push('/workouts')} style={{ alignSelf: 'center' }} />
-            <View style={{ alignItems: 'center' }}>
-              <NeuIconButton icon="play" size={84} accent accessibilityLabel={`Start ${info.label}`} onPress={onStart} />
+            <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+              <ReadyGlow on={gpsOk && phase === 'idle'} color={C.accent} size={84} />
+              <NeuIconButton icon="play" size={84} accent busy={phase === 'preparing'} accessibilityLabel={`${t('rec.start')} ${sportName(t, info.key)}`} onPress={onStart} />
+              {phase === 'preparing' && <Text style={{ color: C.muted, fontSize: 12, marginTop: 10 }}>{t('rec.preparing')}</Text>}
             </View>
           </>
         )}

@@ -1,9 +1,27 @@
+import { memo, useMemo } from 'react';
 import Svg, { Path } from 'react-native-svg';
+import { smoothAltitude, type Point } from '../lib/geo';
 import { useTheme } from '../lib/theme';
 
-export default function ElevationChart({ d, alt, width, height }: { d: number[]; alt: (number | null)[]; width: number; height: number }) {
+/** Altitude profile along the route. Smoothed like the elevation gain, and reduced to about one point per pixel. */
+function ElevationChart({ d, segments, width, height }: { d: number[]; segments: Point[][]; width: number; height: number }) {
   const { C } = useTheme();
-  const pts = d.map((x, i) => [x, alt[i]] as const).filter((p): p is readonly [number, number] => p[1] != null);
+  const pts = useMemo(() => {
+    const alt = segments.flatMap((seg) => smoothAltitude(seg));
+    const all = d.map((x, i) => [x, alt[i]] as const).filter((p): p is readonly [number, number] => p[1] != null);
+    if (all.length < 2) return all;
+    // one sample per pixel column: keeps every hill, drops the 7,000-command paths that lag the UI
+    const maxD = all[all.length - 1][0] || 1, cols = Math.max(2, Math.floor(width));
+    const out: (readonly [number, number])[] = [all[0]];
+    let col = 0, sum = 0, n = 0, dSum = 0;
+    for (const p of all) {
+      const c = Math.min(cols - 1, Math.floor((p[0] / maxD) * cols));
+      if (c !== col) { if (n) out.push([dSum / n, sum / n]); col = c; sum = 0; n = 0; dSum = 0; }
+      sum += p[1]; n++; dSum += p[0];
+    }
+    if (n) out.push([dSum / n, sum / n]);
+    return out;
+  }, [d, segments, width]);
   if (pts.length < 2) return null;
   const maxD = pts[pts.length - 1][0] || 1;
   const as = pts.map((p) => p[1]);
@@ -19,3 +37,5 @@ export default function ElevationChart({ d, alt, width, height }: { d: number[];
     </Svg>
   );
 }
+
+export default memo(ElevationChart);

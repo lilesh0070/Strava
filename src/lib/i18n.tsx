@@ -19,3 +19,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
 export const useT = () => useContext(Ctx);
 
+/** Sport name in the app language (stored activities keep the English key). */
+export const sportName = (t: (k: Key) => string, sport: string) =>
+  t((sport === 'ride' ? 'sport.ride' : sport === 'walk' ? 'sport.walk' : sport === 'hike' ? 'sport.hike' : 'sport.run') as Key);
+

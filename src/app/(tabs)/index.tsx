@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
 import ActivityCard from '../../components/ActivityCard';
 import FeedSkeleton from '../../components/Skeleton';
 import { IconWell, NeuButton, NeuCard } from '../../components/Neu';
@@ -11,7 +11,7 @@ import { compareWeeks } from '../../lib/records';
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Activity, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
-import { useT } from '../../lib/i18n';
+import { sportName, useT } from '../../lib/i18n';
 
 const renderItem = ({ item }: { item: Activity }) => <ActivityCard a={item} />;
 
@@ -73,14 +73,18 @@ export default function Feed() {
         <MaterialCommunityIcons name="magnify" size={20} color={C.muted} />
         <TextInput value={query} onChangeText={setQuery} placeholder={t('feed.search')} placeholderTextColor={C.muted}
           style={{ flex: 1, color: C.text, paddingVertical: 12, fontSize: 15 }} returnKeyType="search" />
-        {query ? <MaterialCommunityIcons name="close-circle" size={18} color={C.muted} onPress={() => setQuery('')} /> : null}
+        {query ? (
+          <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={t('feed.clear')} onPress={() => setQuery('')}>
+            <MaterialCommunityIcons name="close-circle" size={18} color={C.muted} />
+          </Pressable>
+        ) : null}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 8, gap: 12 }}>
         <NeuButton small label={t('feed.all')} selected={sport === 'all'} onPress={() => setSport('all')} />
         {SPORTS.map((s) => (
-          <NeuButton key={s.key} small icon={s.icon as never} label={s.label} selected={sport === s.key} onPress={() => setSport(s.key)} />
+          <NeuButton key={s.key} small icon={s.icon as never} label={sportName(t, s.key)} selected={sport === s.key} onPress={() => setSport(s.key)} />
         ))}
       </ScrollView>
     </View>
@@ -108,7 +112,12 @@ export default function Feed() {
       keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl refreshing={refreshing} tintColor={C.accent} colors={[C.accent]}
-          onRefresh={async () => { setRefreshing(true); reload(); setRefreshing(false); }} />
+          onRefresh={async () => {
+            setRefreshing(true);
+            // long enough to be seen, so the pull visibly does something
+            await Promise.all([reload(), new Promise((r) => setTimeout(r, 450))]);
+            setRefreshing(false);
+          }} />
       }
       ListHeaderComponent={header}
       ListEmptyComponent={
