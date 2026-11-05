@@ -128,8 +128,20 @@ export async function listActivities(): Promise<Activity[]> {
       const missing = ids.filter((id) => stale(cur[id]));
       if (!missing.length) return cur;
       const next = { ...cur };
-      for (const a of await Promise.all(missing.map(readActivitySafe))) if (a) next[a.id] = toSummary(a);
-      await writeSummaries(next);
+      let changed = false;
+      // a few at a time: the first open after an update rebuilds every run, and a long history must not
+      // load every full activity into memory at once
+      for (let i = 0; i < missing.length; i += 8) {
+        const batch = missing.slice(i, i + 8);
+        const full = await Promise.all(batch.map(readActivitySafe));
+        batch.forEach((id, k) => {
+          const a = full[k];
+          if (a) { next[id] = toSummary(a); changed = true; }
+          // unreadable file but an old summary: keep it and don't retry on every list
+          else if (cur[id]) { next[id] = { ...cur[id], effortsV: EFFORTS_V }; changed = true; }
+        });
+      }
+      if (changed) await writeSummaries(next);
       return next;
     });
   }

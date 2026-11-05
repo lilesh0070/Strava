@@ -15,7 +15,7 @@ test('translate falls back to English and keeps placeholders', () => {
   assert.equal(translate('en', 'tab.feed'), 'History');
   assert.equal(translate('hi', 'tab.feed'), 'इतिहास');
   // placeholders survive translation so the screens can substitute values
-  for (const k of ['h.streak', 'upd.available', 'set.dailySub', 'gear.left', 'pr.longest', 'ach.earnedOf'] as Key[]) {
+  for (const k of ['h.streak', 'upd.available', 'set.dailySub', 'gear.left', 'pr.longest', 'ach.earnedOf', 'you.weekOfGoal'] as Key[]) {
     const en = translate('en', k).match(/\{\w+\}/g) ?? [];
     const hi = translate('hi', k).match(/\{\w+\}/g) ?? [];
     assert.deepEqual([...hi].sort(), [...en].sort(), `placeholders differ for ${k}`);

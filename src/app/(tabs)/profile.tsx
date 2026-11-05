@@ -169,7 +169,7 @@ export default function ProfileScreen() {
           <IconWell icon="chart-bar" />
           <View style={{ flex: 1 }}>
             <Text style={F.h2}>{t('you.last8')}</Text>
-            <Text style={{ color: C.muted, fontSize: 13 }}>{thisWeekKm.toFixed(1)} {t('you.ofThisWeek')} {goal} {t('you.kmThisWeek')}</Text>
+            <Text style={{ color: C.muted, fontSize: 13 }}>{t('you.weekOfGoal').replace('{n}', thisWeekKm.toFixed(1)).replace('{goal}', String(goal))}</Text>
           </View>
         </View>
         <NeuProgress value={goal ? thisWeekKm / goal : 0} />

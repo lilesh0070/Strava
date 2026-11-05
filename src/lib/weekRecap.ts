@@ -25,9 +25,10 @@ export type WeekRecap = {
 export function weekRecap(acts: Activity[], weekStart: number): WeekRecap {
   const start = mondayOf(weekStart), end = mondayOf(start + 7 * DAY + DAY / 2);
   const inWeek = acts.filter((a) => a.startedAt >= start && a.startedAt < end);
-  const prev = acts.filter((a) => a.startedAt >= start - 7 * DAY && a.startedAt < start);
+  const prevStart = mondayOf(start - 3 * DAY); // calendar weeks: a DST week is 167 or 169 hours
+  const prev = acts.filter((a) => a.startedAt >= prevStart && a.startedAt < start);
   const dayKm = Array(7).fill(0) as number[];
-  for (const a of inWeek) dayKm[Math.min(6, Math.max(0, Math.floor((a.startedAt - start) / DAY)))] += a.distanceM / 1000;
+  for (const a of inWeek) dayKm[(new Date(a.startedAt).getDay() + 6) % 7] += a.distanceM / 1000; // Mon = 0, by the local calendar
   const km = inWeek.reduce((s, a) => s + a.distanceM, 0) / 1000;
   const prevKm = prev.reduce((s, a) => s + a.distanceM, 0) / 1000;
   const paces = inWeek.filter((a) => a.sport === 'run' && a.distanceM >= 1000 && a.movingSec > 0).map((a) => a.movingSec / (a.distanceM / 1000));
