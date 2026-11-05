@@ -47,7 +47,7 @@ Wellbeing guidance only, not medical advice.
 
 ## Features
 
-- **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service / iOS background location).
+- **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service with its "recording" notification / iOS background location with the blue indicator). Only "While using the app" location access is needed; the app never asks for "Allow all the time" / "Always", and the Android app doesn't declare background location at all.
 - **Crash-safe sessions.** The current recording is saved to storage, so if the app is killed it picks up where it left off.
 - **GPS cleanup.** Drops low-accuracy fixes, stale cached fixes, standing-still jitter and multipath jumps.
 - **Live stats on the lock screen (Android).** While recording, a silent notification shows distance, time and pace, refreshed about every 10 seconds (Settings → Recording to turn off).
@@ -94,7 +94,8 @@ Wellbeing guidance only, not medical advice.
   - Elevation gain comes from a smoothed altitude with an 8 m hysteresis; altitude the chip flags as poor (vertical accuracy > 30 m) is dropped.
   - The ±m accuracy chip re-checks every second and switches to "Finding GPS…" as soon as fixes stop.
   - Detects approximate-only permission or location turned off, and offers the fix (Android: in-app dialogs).
-  - A watchdog restarts GPS if fixes stop arriving during a recording.
+  - A watchdog restarts GPS if fixes stop arriving during a recording (only while the app is on screen: Android doesn't allow starting the foreground service from the background).
+  - If the screen-off recording can't start (the app was relaunched in the background, or the service was refused), GPS falls back to an on-screen-only watcher, the Record screen says "Keep the app open while recording", and the recording moves back to the foreground service as soon as the app is on screen again.
   - A GPS-quality gate before Start warns if the signal is weak.
 - **Live stats.** Pace now, average pace, the current lap, a lap button with voice summaries, and max speed.
 - **Pace coach.** Set a target like 5:30/km and get voice nudges when you drift ±15 s.
@@ -340,6 +341,14 @@ Read this before touching the parts below; each rule exists because breaking it 
   `DistanceState` field must be optional and the code must work when it is missing.
 - If you change what `bestEffort()` returns, bump `EFFORTS_V` in `src/lib/storage.ts` so the cached
   efforts in list summaries are rebuilt once.
+- Screen-off recording is the location task (`startTask()` in `tracker.ts`: `startLocationUpdatesAsync` with
+  `foregroundService` and `showsBackgroundLocationIndicator`). It needs only foreground ("While using")
+  permission, but only when started while the app is in the foreground: Android throws
+  `ForegroundServiceStartNotAllowedException` from the background, and iOS doesn't start a When-In-Use app's
+  updates there. So never start or restart GPS from the background (the watchdog returns early there);
+  `watchPositionAsync` is only the fallback, and `upgradeUpdates()` moves the recording back to the task once
+  the app is on screen. Don't ask for background permission: `ACCESS_BACKGROUND_LOCATION` is in
+  `android.blockedPermissions` in `app.json` (Play requires a prominent disclosure and review for it).
 
 **Texts and languages**
 - Every user-facing string goes through `t('key')` with an English and a Hindi value in `src/lib/strings.ts`

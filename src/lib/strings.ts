@@ -161,6 +161,8 @@ const en = {
   // record screen: offline map, location permission
   'map.offline': 'No internet: map hidden, your route is still being recorded',
   'rec.locWhy': 'See yourself on the map while you record', 'rec.allowLoc': 'Allow location', 'rec.locDenied': 'Location not allowed: tap to fix',
+  // Android's ongoing notification while the recording runs in the background (location foreground service)
+  'location.fgsTitle': 'TBDI FitTrack is recording', 'location.fgsBody': 'Your activity is being tracked.',
   // celebration after a save
   'cel.title': 'New records!', 'cel.badge': 'New badge', 'cel.pr': 'Personal record', 'cel.ok': 'Nice!',
   // weekly card
@@ -433,6 +435,7 @@ const hi: Partial<Record<Key, string>> = {
   'sh.classic': 'पुराना कार्ड शेयर करें', 'sh.noPerm': 'गैलरी में सेव करने के लिए फ़ोटो की अनुमति दें।', 'sh.failed': 'शेयर नहीं हो सका',
   'map.offline': 'इंटरनेट नहीं: नक्शा छिपा है, आपका रूट फिर भी रिकॉर्ड हो रहा है',
   'rec.locWhy': 'रिकॉर्ड करते समय खुद को नक्शे पर देखें', 'rec.allowLoc': 'लोकेशन की अनुमति दें', 'rec.locDenied': 'लोकेशन की अनुमति नहीं: ठीक करने के लिए टैप करें',
+  'location.fgsTitle': 'TBDI FitTrack रिकॉर्ड कर रहा है', 'location.fgsBody': 'आपकी एक्टिविटी ट्रैक हो रही है।',
   'cel.title': 'नए रिकॉर्ड!', 'cel.badge': 'नया बैज', 'cel.pr': 'व्यक्तिगत रिकॉर्ड', 'cel.ok': 'बढ़िया!',
   'wk.title': 'मेरा हफ़्ता', 'wk.share': 'हफ़्ते का कार्ड शेयर करें', 'wk.image': 'इमेज', 'wk.text': 'टेक्स्ट कॉपी करें', 'wk.this': 'इस हफ़्ते', 'wk.last': 'पिछला हफ़्ता',
   'wk.activities': 'एक्टिविटी', 'wk.best': 'बेस्ट पेस', 'wk.steps': 'कदम', 'wk.streak': 'स्ट्रीक', 'wk.weeks': 'हफ़्ते', 'wk.vsLast': 'पिछले हफ़्ते से',
