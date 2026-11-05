@@ -158,9 +158,9 @@ export function IconWell({ icon, size = 48, color }: { icon: IconName; size?: nu
   );
 }
 
-/** Tile: icon well + title + subtitle, like a settings or category card. */
-export function NeuTile({ icon, title, subtitle, onPress, right, style }: {
-  icon: IconName; title: string; subtitle?: string; onPress?: () => void; right?: ReactNode; style?: StyleProp<ViewStyle>;
+/** Tile: icon well + title + subtitle, like a settings or category card. `selected` keeps it sunk in (a chosen option). */
+export function NeuTile({ icon, title, subtitle, onPress, right, style, selected }: {
+  icon: IconName; title: string; subtitle?: string; onPress?: () => void; right?: ReactNode; style?: StyleProp<ViewStyle>; selected?: boolean;
 }) {
   const { C, S } = useTheme();
   const { scale, onPressIn, onPressOut } = usePressScale(0.985);
@@ -168,6 +168,7 @@ export function NeuTile({ icon, title, subtitle, onPress, right, style }: {
     <Pressable
       disabled={!onPress}
       accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityState={selected != null ? { selected } : undefined}
       onPressIn={onPress ? onPressIn : undefined}
       onPressOut={onPress ? onPressOut : undefined}
       onPress={() => { Haptics.selectionAsync().catch(() => undefined); onPress?.(); }}
@@ -175,10 +176,10 @@ export function NeuTile({ icon, title, subtitle, onPress, right, style }: {
     >
       {({ pressed }) => (
         <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 26,
-          backgroundColor: C.bg, boxShadow: pressed ? S.inset : S.raised, transform: [{ scale }] }}>
+          backgroundColor: C.bg, boxShadow: pressed || selected ? S.inset : S.raised, transform: [{ scale }] }}>
           <IconWell icon={icon} />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }} numberOfLines={1}>{title}</Text>
+            <Text style={{ color: selected ? C.accentInk : C.text, fontSize: 17, fontWeight: '700' }} numberOfLines={1}>{title}</Text>
             {subtitle ? <Text style={{ color: C.muted, fontSize: 13, marginTop: 2 }} numberOfLines={2}>{subtitle}</Text> : null}
           </View>
           {right}

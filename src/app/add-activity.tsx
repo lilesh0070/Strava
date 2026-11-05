@@ -61,7 +61,7 @@ export default function AddActivity() {
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         {SPORTS.map((s) => (
           <View key={s.key} style={{ alignItems: 'center', gap: 8 }}>
-            <NeuIconButton icon={s.icon as never} size={58} color={sport === s.key ? C.accent : C.muted}
+            <NeuIconButton icon={s.icon as never} size={58} color={sport === s.key ? C.accentInk : C.muted}
               accessibilityLabel={sportName(t, s.key)} selected={sport === s.key} onPress={() => setSport(s.key)} />
             <Text style={{ color: sport === s.key ? C.accentInk : C.muted, fontWeight: '700', fontSize: 13 }}>{sportName(t, s.key)}</Text>
           </View>
