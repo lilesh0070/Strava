@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
@@ -10,7 +10,7 @@ export default function ToastHost() {
   const { C, S } = useTheme();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const y = useRef(new Animated.Value(120)).current;
+  const [y] = useState(() => new Animated.Value(120));
   useEffect(() => {
     Animated.spring(y, { toValue: toast ? 0 : 120, useNativeDriver: true, friction: 9, tension: 80 }).start();
   }, [toast, y]);

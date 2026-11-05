@@ -36,7 +36,9 @@ export default function ActivityDetail() {
   const prs = useMemo(() => [...personalRecords(items ?? []).values()].filter((r) => r.activityId === id && r.kind === 'effort'), [items, id]);
   useEffect(() => { getProfile().then((p) => setWeightKg(p.weightKg)); }, []);
 
-  useEffect(() => { getActivity(id).then((x) => { setA(x); setName(x?.name ?? ''); }); }, [id]);
+  useEffect(() => {
+    getActivity(id).then((x) => { setA(x); setName(x?.name ?? ''); }).catch(() => setA(null));
+  }, [id]);
 
   const data = useMemo(() => (a ? { splits: splits(a.segments), cum: cumulative(a.segments) } : null), [a]);
 
@@ -48,13 +50,18 @@ export default function ActivityDetail() {
   const bestPerKm = Math.min(...data.splits.map((s) => s.durationSec * (1000 / s.distanceM)));
   const maxAlt = Math.max(...data.cum.alt.filter((x): x is number => x != null), -Infinity);
 
+  const saveFailed = (e: unknown) => Alert.alert('Could not save', String((e as Error)?.message ?? e));
   const saveName = async () => {
     const next = { ...a, name: name.trim() || a.name };
-    await saveActivity(next);
+    try { await saveActivity(next); } catch (e) { saveFailed(e); return; }
     setA(next); setEditing(false);
   };
 
-  const update = async (next: Activity) => { setA(next); await saveActivity(next); };
+  const update = async (next: Activity) => {
+    const prev = a;
+    setA(next);
+    try { await saveActivity(next); } catch (e) { setA(prev); saveFailed(e); } // show what is really stored
+  };
 
   const onShare = async () => {
     try {
@@ -68,9 +75,13 @@ export default function ActivityDetail() {
   const onDelete = () => Alert.alert('Delete activity?', undefined, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: async () => {
-      const removed = await deleteActivity(a.id);
+      let removed: Activity | null;
+      try { removed = await deleteActivity(a.id); } catch (e) { Alert.alert('Could not delete', String((e as Error)?.message ?? e)); return; }
       router.back();
-      if (removed) showToast(t('toast.deleted'), { label: t('toast.undo'), run: () => { saveActivity(removed); } });
+      if (removed) {
+        const back = removed;
+        showToast(t('toast.deleted'), { label: t('toast.undo'), run: () => { saveActivity(back).catch(saveFailed); } });
+      }
     } },
   ]);
 

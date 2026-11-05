@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Text, TextInput, View } from 'react-native';
@@ -7,7 +8,7 @@ import { setDailyReminder } from '../lib/reminders';
 import { fmtDuration } from '../lib/geo';
 import GithubSyncCard from '../components/GithubSyncCard';
 import { exportBackup, importBackup, storageBytes } from '../lib/backup';
-import { getSettings, saveSettings } from '../lib/storage';
+import { getSettings, updateSettings } from '../lib/storage';
 import { useTheme } from '../lib/theme';
 import { refreshSettings } from '../lib/tracker';
 import type { Settings } from '../lib/types';
@@ -32,17 +33,29 @@ export default function SettingsScreen() {
   const [bytes, setBytes] = useState<number | null>(null);
   const u = useUpdateState();
 
+  const loadSettings = () => getSettings().then((x) => { setS(x); setPaceText(x.targetPaceSec ? fmtDuration(x.targetPaceSec) : ''); return x; });
   useEffect(() => {
-    getSettings().then((x) => { setS(x); setPaceText(x.targetPaceSec ? fmtDuration(x.targetPaceSec) : ''); });
-    storageBytes().then(setBytes);
+    loadSettings();
+    storageBytes().then(setBytes).catch(() => undefined);
   }, []);
   if (!s) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
 
   const set = async (patch: Partial<Settings>) => {
-    const next = { ...s, ...patch };
-    setS(next);
-    await saveSettings(next);
+    // merge into the stored settings, not this screen's copy, so nothing saved meanwhile is reverted
+    setS((cur) => (cur ? { ...cur, ...patch } : cur));
+    setS(await updateSettings(patch));
     refreshSettings();
+  };
+
+  /** Move the reminder to another hour; only saved once the notification is really scheduled. */
+  const moveReminder = async (h: number) => {
+    const ok = await setDailyReminder(true, h).catch(() => false);
+    if (!ok) {
+      set({ reminder: false }); // the old one was cancelled, so don't show it as on
+      Alert.alert('Notifications are off', 'Allow notifications for Stride in system settings.');
+      return;
+    }
+    set({ reminderHour: h });
   };
 
   const toggle = (icon: Parameters<typeof NeuTile>[0]['icon'], title: string, subtitle: string, key: keyof Settings) => (
@@ -81,7 +94,7 @@ export default function SettingsScreen() {
 
           {u.apk?.notes ? (
             <NeuCard inset radius={18} padding={12}>
-              <Text style={[F.label, { marginBottom: 4 }]}>What's new</Text>
+              <Text style={[F.label, { marginBottom: 4 }]}>{"What's new"}</Text>
               <Text style={{ color: C.text, fontSize: 13 }} numberOfLines={8}>{u.apk.notes}</Text>
             </NeuCard>
           ) : null}
@@ -181,27 +194,39 @@ export default function SettingsScreen() {
           </View>
           {s.reminder && (
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-              <NeuIconButton icon="minus" size={38} accessibilityLabel="Earlier" onPress={() => {
-                const h = (s.reminderHour + 23) % 24; set({ reminderHour: h }); setDailyReminder(true, h);
-              }} />
+              <NeuIconButton icon="minus" size={38} accessibilityLabel="Earlier" onPress={() => moveReminder((s.reminderHour + 23) % 24)} />
               <Text style={{ color: C.text, fontWeight: '800', fontSize: 18, width: 70, textAlign: 'center' }}>{String(s.reminderHour).padStart(2, '0')}:00</Text>
-              <NeuIconButton icon="plus" size={38} accessibilityLabel="Later" onPress={() => {
-                const h = (s.reminderHour + 1) % 24; set({ reminderHour: h }); setDailyReminder(true, h);
-              }} />
+              <NeuIconButton icon="plus" size={38} accessibilityLabel="Later" onPress={() => moveReminder((s.reminderHour + 1) % 24)} />
             </View>
           )}
         </NeuCard>
       </Section>
 
+      <Section title={t('fr.title')}>
+        <NeuTile icon="account-group-outline" title={t('fr.leaderboard')} subtitle={t('fr.settingsSub')} onPress={() => router.push('/friends')} />
+      </Section>
+
       <Section title={t('set.data')}>
         <GithubSyncCard />
         <NeuTile icon="cloud-upload-outline" title="Back up" subtitle="Save all activities, gear and settings to a file"
-          onPress={() => exportBackup().catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
+          onPress={() => exportBackup()
+            .then(({ unreadable }) => {
+              if (unreadable) Alert.alert('Some activities left out', `${unreadable} activit${unreadable === 1 ? 'y' : 'ies'} could not be read on this phone and ${unreadable === 1 ? 'is' : 'are'} not in the file.`);
+            })
+            .catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
         <NeuTile icon="cloud-download-outline" title="Restore" subtitle="Import a Stride backup file (merges, nothing is deleted)"
           onPress={async () => {
             try {
               const n = await importBackup();
-              if (n != null) { Alert.alert('Restored', `${n} activities imported.`); storageBytes().then(setBytes); }
+              if (n == null) return;
+              // the backup may have changed settings: show them, apply them, and schedule its reminder
+              const next = await loadSettings();
+              refreshSettings();
+              // schedule (or cancel) to match the restored setting
+              const ok = await setDailyReminder(next.reminder, next.reminderHour).catch(() => false);
+              if (next.reminder && !ok) set({ reminder: false });
+              Alert.alert('Restored', `${n} new activities imported.`);
+              storageBytes().then(setBytes).catch(() => undefined);
             } catch (e) { Alert.alert('Restore failed', String((e as Error)?.message ?? e)); }
           }} />
         {bytes != null && (

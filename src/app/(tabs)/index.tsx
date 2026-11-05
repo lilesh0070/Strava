@@ -5,7 +5,7 @@ import { FlatList, RefreshControl, ScrollView, Text, TextInput, View } from 'rea
 import ActivityCard from '../../components/ActivityCard';
 import FeedSkeleton from '../../components/Skeleton';
 import { IconWell, NeuButton, NeuCard } from '../../components/Neu';
-import { fmtDuration, fmtKm } from '../../lib/geo';
+import { fmtDuration } from '../../lib/geo';
 import { compareWeeks } from '../../lib/records';
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Activity, type Sport } from '../../lib/types';

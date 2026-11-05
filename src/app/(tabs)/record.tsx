@@ -2,14 +2,14 @@ import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Alert, Linking, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed, totalDistance } from '../../lib/geo';
-import { gpsHealth, lapsFromMarks } from '../../lib/live';
+import { gpsHealth } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
 import { newRecords } from '../../lib/records';
 import { getSettings, listActivities } from '../../lib/storage';
@@ -17,7 +17,7 @@ import { useSelectedWorkout } from '../../lib/workoutSelection';
 import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
-import { SPORTS, sessionMovingSec, sportInfo, type Sport } from '../../lib/types';
+import { SPORTS, sessionMovingSec, sportInfo, workoutSec, type Sport } from '../../lib/types';
 import { useT } from '../../lib/i18n';
 
 // Snapshot changes identity on every tracker notification so React re-renders.
@@ -36,68 +36,70 @@ export default function Record() {
   const insets = useSafeAreaInsets();
   const { session, fix } = useTracker();
   const [sport, setSport] = useState<Sport>('run');
-  const [, tick] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const [focused, setFocused] = useState(false);
   const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const selectedWorkout = useSelectedWorkout();
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const starting = useRef(false); // Start pressed and not finished yet (permission check / countdown)
 
-  // restore an in-progress session after app restart
-  useEffect(() => { tracker.restore(); }, []);
+  // (an in-progress session is restored at app start, in the root layout)
   useEffect(() => () => { if (cdTimer.current) clearInterval(cdTimer.current); }, []);
 
-  // live clock
+  // live clock: drives the timer while recording, and GPS-signal freshness while this tab is open
+  const recording = !!session;
   useEffect(() => {
-    if (!session) return;
-    const id = setInterval(() => { tick((n) => n + 1); tracker.workoutTick(); }, 1000);
+    if (!recording && !focused) return;
+    const id = setInterval(() => {
+      // nobody sees the screen in the background: skip the re-render (and map redraw), keep the workout ticking
+      if (AppState.currentState === 'active') setNow(Date.now());
+      if (recording) tracker.workoutTick();
+    }, 1000);
     return () => clearInterval(id);
-  }, [session]);
+  }, [recording, focused]);
 
   // show current position while this tab is focused
   useFocusEffect(useCallback(() => {
     let sub: { remove(): void } | null = null;
     let cancelled = false;
-    tracker.ensurePermissions().then(async (p) => {
+    setFocused(true);
+    tracker.ensurePermissions(false).then(async (p) => {
       setPerm(p);
       if (p === 'denied' || cancelled) return;
       sub = await tracker.warmUp();
       if (cancelled) sub?.remove();
     });
-    return () => { cancelled = true; sub?.remove(); };
+    return () => { cancelled = true; sub?.remove(); setFocused(false); };
   }, []));
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
-  const dist = active ? totalDistance(active.segments) : 0;
-  const moving = active ? sessionMovingSec(active) : 0;
-  const health = gpsHealth(fix, Date.now());
+  // the running total is kept incrementally; summing every point each second gets slow on long sessions
+  const dist = active ? active.distanceM ?? totalDistance(active.segments) : 0;
+  const moving = active ? sessionMovingSec(active, now) : 0;
+  const health = gpsHealth(fix, now);
   const gpsOk = health === 'good';
-  const cur = tracker.currentSpeed();
+  const cur = tracker.currentSpeed(now);
   const laps = active?.laps ?? [];
-  const lapRows = active ? lapsFromMarks(laps, active.distanceM ?? dist, moving) : [];
-  const openLap = lapRows[lapRows.length - 1];
+  // the open lap always starts at the last press, so the display changes the moment Lap is tapped
+  const lastMark = laps[laps.length - 1] ?? { distanceM: 0, movingSec: 0 };
+  const openLap = { distanceM: Math.max(0, dist - lastMark.distanceM), durationSec: Math.max(0, moving - lastMark.movingSec) };
 
   const begin = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    await tracker.start(sport, selectedWorkout);
+    try { await tracker.start(sport, selectedWorkout); } finally { starting.current = false; }
   };
 
   const onStart = async () => {
-    if (perm === 'denied') {
-      Alert.alert('Location needed', 'Allow location access in Settings to record activities.', [
-        { text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() },
-      ]);
-      return;
-    }
-    if (health !== 'good') {
-      const go = await new Promise<boolean>((resolve) => Alert.alert(
-        health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
-        t('rec.weakBody'),
-        [{ text: t('rec.wait'), style: 'cancel', onPress: () => resolve(false) }, { text: t('rec.anyway'), onPress: () => resolve(true) }],
-      ));
-      if (!go) return;
-    }
-    if (!(await getSettings()).countdown) return begin();
+    if (starting.current) return; // ignore double taps (and a second countdown)
+    starting.current = true;
+    let countdownOn: boolean;
+    try {
+      if (!(await prepareStart())) { starting.current = false; return; }
+      countdownOn = (await getSettings()).countdown;
+    } catch { starting.current = false; return; }
+    if (!countdownOn) return begin();
     let n = 3;
     setCountdown(n);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
@@ -115,21 +117,51 @@ export default function Record() {
     }, 1000);
   };
 
+  /** Permission and GPS-quality checks before recording. Resolves false if the user should not start yet. */
+  const prepareStart = async () => {
+    // permission may have changed in system Settings since this tab was focused; Start is also where
+    // "Allow all the time" is requested (once)
+    let p = perm;
+    if (p !== 'background') { p = await tracker.ensurePermissions(true); setPerm(p); }
+    if (p === 'denied') {
+      Alert.alert('Location needed', 'Allow location access in Settings to record activities.', [
+        { text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      ]);
+      return false;
+    }
+    if (health !== 'good') {
+      return new Promise<boolean>((resolve) => Alert.alert(
+        health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
+        t('rec.weakBody'),
+        [{ text: t('rec.wait'), style: 'cancel', onPress: () => resolve(false) }, { text: t('rec.anyway'), onPress: () => resolve(true) }],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      ));
+    }
+    return true;
+  };
+
   const cancelCountdown = () => {
     if (cdTimer.current) clearInterval(cdTimer.current);
     cdTimer.current = null;
     setCountdown(null);
+    starting.current = false;
   };
 
   const onFinish = () => {
     Alert.alert(t('rec.finishQ'), undefined, [
-      { text: t('rec.resume'), style: 'cancel' },
+      { text: t('rec.resume'), style: 'cancel', onPress: () => { tracker.resume(); } },
       { text: t('rec.discard'), style: 'destructive', onPress: () => tracker.discard() },
       {
         text: t('rec.save'),
         onPress: async () => {
           const before = await listActivities().catch(() => []);
-          const a = await tracker.finish();
+          let a;
+          try { a = await tracker.finish(); }
+          catch (e) {
+            // the recording is kept, so the user can try again
+            Alert.alert(t('rec.saveFailed'), `${t('rec.saveFailedBody')}\n\n${String((e as Error)?.message ?? e)}`);
+            return;
+          }
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
           if (!a) return;
           router.push(`/activity/${a.id}`);
@@ -194,15 +226,15 @@ export default function Record() {
               {info.usesPace
                 ? <Stat label={t('rec.avgPace')} value={fmtPace(dist, moving)} unit="/km" />
                 : <Stat label={t('rec.avgSpeed')} value={fmtSpeed(dist, moving)} unit="km/h" />}
-              <Stat label={`${t('rec.lap')} ${lapRows.length || 1}`} value={openLap ? fmtDuration(openLap.durationSec) : '0:00'} />
-              <Stat label={t('rec.lapDist')} value={openLap ? fmtKm(openLap.distanceM) : '0.00'} unit="km" />
+              <Stat label={`${t('rec.lap')} ${laps.length + 1}`} value={fmtDuration(openLap.durationSec)} />
+              <Stat label={t('rec.lapDist')} value={fmtKm(openLap.distanceM)} unit="km" />
             </View>
             {(() => {
               const w = findWorkout(active.workout?.workoutId);
               if (!w || !active.workout) return null;
               if (active.workout.done) return <Text style={{ color: C.success, textAlign: 'center', fontWeight: '800' }}>Workout complete ✓</Text>;
               const step = w.steps[active.workout.index];
-              const left = remaining(w, active.workout, active.distanceM ?? 0, moving);
+              const left = remaining(w, active.workout, active.distanceM ?? 0, workoutSec(active, now));
               return (
                 <NeuCard inset radius={20} padding={12} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={{ color: step.kind === 'work' ? C.accent : C.muted, fontWeight: '800' }}>

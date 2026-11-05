@@ -53,6 +53,7 @@
       "expo-sharing",
       "expo-notifications",
       "./plugins/withReleaseSigning",
+      "./plugins/withAsyncStorageSize",
       "expo-secure-store",
       [
         "expo-splash-screen",
@@ -75,7 +76,11 @@
       "policy": "appVersion"
     },
     "extra": {
-      "updateRepo": "lilesh0070/strava"
+      "updateRepo": "lilesh0070/strava",
+      "firebase": {
+        "apiKey": "AIzaSyCmWgSnBdUQerKmM0mcf3xlqHcdmTAmXoQ",
+        "projectId": "stribe-a8108"
+      }
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",

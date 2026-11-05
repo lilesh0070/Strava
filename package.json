@@ -1,7 +1,7 @@
 {
   "name": "stride",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -37,6 +37,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~58.0.4",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -45,7 +47,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --import ./scripts/test-resolve.mjs --test src/lib/*.test.ts"
+    "test": "node --experimental-strip-types --import ./scripts/test-resolve.mjs --test src/lib/*.test.ts",
+    "lint": "expo lint",
+    "test:friends": "npx -y firebase-tools@15.35.0 emulators:exec --only auth,firestore --project demo-stride 'node --experimental-strip-types --import ./scripts/test-resolve.mjs --test scripts/friends-rules.test.ts'"
   },
   "private": true
 }

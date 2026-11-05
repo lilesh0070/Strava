@@ -4,7 +4,7 @@
 //     Android package installer.
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Updates from 'expo-updates';
 import { useSyncExternalStore } from 'react';
@@ -61,10 +61,22 @@ async function checkApk() {
   } else set({ apk: null });
 }
 
+/** Delete downloaded update APKs for versions already installed (Android only clears the cache when space runs low). */
+function cleanupOldApks() {
+  if (Platform.OS !== 'android') return;
+  try {
+    for (const f of new Directory(Paths.cache).list()) {
+      const m = f instanceof File ? /^stride-(.+)\.apk$/i.exec(f.name) : null;
+      if (m && compareVersions(m[1], currentVersion()) <= 0) f.delete();
+    }
+  } catch { /* best effort */ }
+}
+
 /** Check both channels. Safe to call repeatedly; concurrent calls are coalesced. */
 let inflight: Promise<void> | null = null;
 export function checkForUpdates(): Promise<void> {
   if (inflight) return inflight;
+  cleanupOldApks();
   set({ checking: true, error: null });
   inflight = (async () => {
     const results = await Promise.allSettled([checkOta(), checkApk()]);
