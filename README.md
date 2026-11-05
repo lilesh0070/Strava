@@ -84,7 +84,7 @@ Wellbeing guidance only, not medical advice.
   - Full GPS (highest accuracy: best-for-navigation on Android, "Best" on iPhone) every second (every 3 s in battery saver) with no distance filter, so the live position never goes stale, even when you stand still.
   - A constant-velocity Kalman filter fed with the GPS chip's Doppler speed and course: no zig-zag, no lag behind you, no corner cutting.
   - Distance is credited for every filtered fix: on foot the filtered speed is integrated over time (position noise inflated walks by 3-6 %), rides use the filtered position, and phones whose chip reports no speed get a second, accuracy-aware smoother. A "still" state with hysteresis counts a stop as 0 m without clipping slow hikers; a GPS outage credits the straight line.
-  - Simulator results (`npm run sim:gps`: real tracker code, realistic noise, 14 routes incl. traffic-light stops, standing 10 min, slow hikes, a 400 m track, a 60 s outage): mean distance error ≈ 0.7 % (Android), 1.0 % (iPhone), 2.0 % (no Doppler); standing ten minutes adds ~3 m on Android, ~7 m on iPhone and ~50 m without Doppler (was 281 m on Android).
+  - Simulator results (`npm run sim:gps`: real tracker code, realistic noise, 14 routes incl. traffic-light stops, standing 10 min, slow hikes, a 400 m track, a 60 s outage): mean distance error ≈ 0.7 % (Android), 0.8 % (iPhone), 2.0 % (no Doppler); standing ten minutes adds ~3 m on Android, ~5 m on iPhone and ~50 m without Doppler (was 281 m on Android).
   - Every stored point carries the recorded distance, so splits, best efforts and the pace chart agree with the headline number (GPX exports positions only; other apps re-measure them, within ~0.5 % in the simulator). Best efforts never span a pause.
   - iPhones report "speed 0, course −1" when standing and Android "0/0" for a stop or for no speed at all; both conventions are handled, so a stop reads as a stop and a budget phone's walk is not pinned at zero.
   - Standing still adds no distance; a single multipath jump is rejected; Android's cached "last location" can't start a route in the wrong place.
@@ -320,7 +320,7 @@ Read this before touching the parts below; each rule exists because breaking it 
   accurate fix): a single multipath jump must not resume.
 - After changing any of this, run `npm run test:tracker`, `npm run sim:gps` and `npm run sim:autopause`
   and compare with today's baseline by eye (the simulators only print, nothing fails): `sim:gps` mean |error|
-  ≈ 0.7 / 1.0 / 2.0 % (Android / iPhone / no Doppler) and `stand 10m` creep ≈ 3 / 7 / 50 m; `sim:autopause`
+  ≈ 0.7 / 0.8 / 2.0 % (Android / iPhone / no Doppler) and `stand 10m` creep ≈ 3 / 5 / 50 m; `sim:autopause`
   "run city 6 stops" → 6 / 6 / ≈4.5 pauses of 6, and 0 pauses on the hikes. Put a new scenario in
   `scripts/sim/gps-sim.ts` when you fix a case.
 - The session is persisted and restored after an app kill **and after an app update**. A new `Session` or
@@ -391,8 +391,8 @@ Before every pull request:
   `t('key')` with an English and a Hindi value in `src/lib/strings.ts`. Read *Rules for changing the code* first.
 - If you touched `src/lib/tracker.ts`, `src/lib/live.ts` or `src/lib/geo.ts`: `npm run test:tracker` (the recording engine
   end to end under Node) and `npm run sim:gps` (distance error of the real tracker over synthetic routes
-  for Android, iPhone and no-Doppler phones; keep the means near 0.7 / 1.0 / 2.0 % and the 10-minute
-  standing creep near 3 / 7 / 50 m). `npm run sim:autopause` checks auto-pause/resume behaviour.
+  for Android, iPhone and no-Doppler phones; keep the means near 0.7 / 0.8 / 2.0 % and the 10-minute
+  standing creep near 3 / 5 / 50 m). `npm run sim:autopause` checks auto-pause/resume behaviour.
 - If you touched `src/lib/friends.ts`, `src/lib/firebase.ts` or `firestore.rules`: `npm run test:friends`
   (needs Java 21; downloads firebase-tools and the emulators the first time).
 - Add native libraries with `npx expo install <package>` so the version matches Expo SDK 58. A new

@@ -340,9 +340,11 @@ export function currentSpeed(): number | null {
   // freshness of the fix itself is judged by arrival time above; Doppler / track age in GPS time below, so a
   // phone clock that is off from GPS time can't hide "pace now"
   const kf = session.kf;
-  if (kf && typeof kf.vs === 'number' && kf.n > 2 && hasDoppler(kf, kf.t)) return kf.vs < STOPPED_MS ? null : kf.vs;
+  // newest fix of any quality, in GPS time: a run of unusable fixes (indoors) blanks "pace now" instead of freezing it
+  const ft = lastFix?.t ?? kf?.t ?? 0;
+  if (kf && typeof kf.vs === 'number' && kf.n > 2 && hasDoppler(kf, ft)) return kf.vs < STOPPED_MS ? null : kf.vs;
   const last = cred[cred.length - 1];
-  if (!last || !kf || kf.t - last.t > 15_000) return null;
+  if (!last || ft - last.t > 15_000) return null;
   return creditedSpeed(30);
 }
 

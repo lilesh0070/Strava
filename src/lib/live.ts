@@ -26,6 +26,8 @@ export type KalmanState = {
   outlier?: boolean; // true when this step's fix was rejected
   /** Time of the last fix that carried a usable Doppler velocity (phones without one never set it). */
   dopT?: number;
+  /** Consecutive fixes reporting exactly speed 0: one is a glitch while moving, two in a row are a stop. */
+  zeroN?: number;
 };
 
 const M_PER_DEG = (6371000 * Math.PI) / 180; // same earth radius as haversine()
@@ -112,7 +114,10 @@ export function kalmanStep(state: KalmanState | null | undefined, f: GpsFix, q =
   [pp, pv, vv] = [(1 - kp) * pp, (1 - kp) * pv, vv - kv * pv];
 
   // velocity update (Doppler)
-  const m = fixVelocity(f, Math.hypot(ve, vn), hasDoppler(s, f.t));
+  // a single exact 0 while the filter says "moving" is a glitch; repeated zeros right after moving are a real
+  // stop (an abrupt halt at a light), so after two the glitch rule is lifted and the Doppler chain stays alive
+  const zeroN = f.spd === 0 ? (s.zeroN ?? 0) + 1 : 0;
+  const m = fixVelocity(f, zeroN >= 2 ? 0 : Math.hypot(ve, vn), hasDoppler(s, f.t));
   if (m) {
     const S2 = vv + m.sd * m.sd, kp2 = pv / S2, kv2 = vv / S2;
     const de = m.ve - ve, dn = m.vn - vn;
@@ -123,7 +128,7 @@ export function kalmanStep(state: KalmanState | null | undefined, f: GpsFix, q =
   const speed = Math.hypot(ve, vn);
   const vs = s.vs + (1 - Math.exp(-dt / 3)) * (speed - s.vs);
   const dopT = m ? f.t : s.dopT; // a measured stop is Doppler too (iOS reports exactly that while standing)
-  return { lat, lng, ve, vn, pp, pv, vv, t: f.t, n: s.n + 1, rej: 0, vs, dopT };
+  return { lat, lng, ve, vn, pp, pv, vv, t: f.t, n: s.n + 1, rej: 0, vs, dopT, zeroN };
 }
 
 /** True while the chip has been giving Doppler velocity recently (so speed, not just position, is trusted). */

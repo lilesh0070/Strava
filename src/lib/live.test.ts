@@ -256,3 +256,18 @@ test('kalman: a rejected spike keeps the Doppler history (a standing Android pho
   const after = kalmanStep(spike, { ...pt(19, 72.8, 26_000, 5), spd: 0, hdg: 0 }, 2);
   assert.equal(after.dopT, 26_000); // still read as a measured stop
 });
+
+test('kalman: an abrupt stop on an Android chip (exact 0 / 0 right after running) reads as stopped', () => {
+  let k: KalmanState | null = null;
+  for (let i = 0; i < 30; i++) k = kalmanStep(k, { ...pt(19 + (3 * i) / M, 72.8, i * 1000, 5), spd: 3, hdg: 0.5 }, 2);
+  const here = 19 + (3 * 29) / M;
+  // first zero: still treated as a glitch (filter says ~3 m/s)
+  k = kalmanStep(k, { ...pt(here, 72.8, 30_000, 5), spd: 0, hdg: 0 }, 2);
+  for (let i = 31; i < 36; i++) k = kalmanStep(k, { ...pt(here, 72.8, i * 1000, 5), spd: 0, hdg: 0 }, 2);
+  assert.ok(Math.hypot(k!.ve, k!.vn) < STOPPED_MS, `still moving at ${Math.hypot(k!.ve, k!.vn).toFixed(2)} m/s after 6 s of zeros`);
+  assert.equal(hasDoppler(k, 35_000), true); // the Doppler chain is kept, so standing adds nothing
+  // a single 0 in the middle of a run is still ignored
+  let r: KalmanState | null = null;
+  for (let i = 0; i < 30; i++) r = kalmanStep(r, { ...pt(19 + (3 * i) / M, 72.8, i * 1000, 5), spd: i === 20 ? 0 : 3, hdg: i === 20 ? 0 : 0.5 }, 2);
+  assert.ok(Math.abs(r!.vs - 3) < 0.3, `a one-off zero dragged the speed to ${r!.vs.toFixed(2)}`);
+});
