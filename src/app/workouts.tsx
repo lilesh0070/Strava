@@ -12,7 +12,7 @@ export default function Workouts() {
   return (
     <ScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 60 }}>
       <Text style={{ color: C.muted }}>
-        Pick a session and Stride will talk you through every interval: when to push, when to recover, and how much is left.
+        Pick a session and TBDI FitTrack will talk you through every interval: when to push, when to recover, and how much is left.
       </Text>
       <NeuTile icon="run" title="Free run" subtitle="No structure, just record" onPress={() => pick(null)}
         right={selected == null ? <Text style={{ color: C.accent, fontWeight: '800' }}>✓</Text> : null} />

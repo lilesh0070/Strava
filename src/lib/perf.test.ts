@@ -16,7 +16,7 @@ test('simplify keeps shape with far fewer points', () => {
 });
 
 test('hindi strings and fallback', () => {
-  assert.equal(translate('hi', 'tab.feed'), 'फ़ीड');
-  assert.equal(translate('en', 'tab.feed'), 'Feed');
+  assert.equal(translate('hi', 'tab.feed'), 'इतिहास');
+  assert.equal(translate('en', 'tab.feed'), 'History');
   assert.match(kmCueHi(2, 660, true), /^2 किलोमीटर पूरे। समय 11 मिनट। औसत पेस 5 मिनट 30 सेकंड प्रति किलोमीटर।$/);
 });

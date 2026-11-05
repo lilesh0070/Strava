@@ -1,11 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { FlatList, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { RefreshControl, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
 import ActivityCard from '../../components/ActivityCard';
 import FeedSkeleton from '../../components/Skeleton';
 import { IconWell, NeuButton, NeuCard } from '../../components/Neu';
 import { fmtDuration } from '../../lib/geo';
+import { activitySteps, fmtSteps } from '../../lib/steps';
 import { compareWeeks } from '../../lib/records';
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Activity, type Sport } from '../../lib/types';
@@ -13,6 +14,25 @@ import { useActivities } from '../../lib/useActivities';
 import { useT } from '../../lib/i18n';
 
 const renderItem = ({ item }: { item: Activity }) => <ActivityCard a={item} />;
+
+type Month = { key: string; title: string; km: number; steps: number; data: Activity[] };
+/** Every activity, newest first, grouped by calendar month with that month's totals. */
+function byMonth(acts: Activity[]): Month[] {
+  const out: Month[] = [];
+  for (const a of acts) {
+    const d = new Date(a.startedAt);
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    let m = out[out.length - 1];
+    if (!m || m.key !== key) {
+      m = { key, title: d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }), km: 0, steps: 0, data: [] };
+      out.push(m);
+    }
+    m.data.push(a);
+    m.km += a.distanceM / 1000;
+    m.steps += activitySteps(a)?.steps ?? 0;
+  }
+  return out;
+}
 
 export default function Feed() {
   const { C, S, F } = useTheme();
@@ -29,6 +49,7 @@ export default function Feed() {
       (!q || a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q)));
   }, [items, query, sport]);
 
+  const sections = useMemo(() => byMonth(filtered), [filtered]);
   if (!items) return <FeedSkeleton />;
 
   const cmp = compareWeeks(items);
@@ -66,10 +87,19 @@ export default function Feed() {
   ) : undefined;
 
   return (
-    <FlatList
-      data={filtered}
+    <SectionList
+      sections={sections}
       keyExtractor={(a) => a.id}
       renderItem={renderItem}
+      stickySectionHeadersEnabled={false}
+      renderSectionHeader={({ section }) => (
+        <View style={{ marginHorizontal: 26, marginBottom: 14, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <Text style={[F.label, { fontSize: 12 }]}>{section.title}</Text>
+          <Text style={{ color: C.muted, fontSize: 12, fontWeight: '600' }}>
+            {section.data.length} {t('feed.activities')} · {section.km.toFixed(1)} km{section.steps ? ` · ${fmtSteps(section.steps)} 👣` : ''}
+          </Text>
+        </View>
+      )}
       initialNumToRender={4}
       maxToRenderPerBatch={4}
       windowSize={7}

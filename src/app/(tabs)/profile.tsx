@@ -6,6 +6,8 @@ import GearCard from '../../components/GearCard';
 import { router } from 'expo-router';
 import { IconWell, NeuButton, NeuCard, NeuProgress, NeuTile } from '../../components/Neu';
 import { evaluateAchievements } from '../../lib/achievements';
+import { wellnessBadges } from '../../lib/health';
+import { useWellness } from '../../lib/wellnessStore';
 import GoalRing from '../../components/GoalRing';
 import { monthKm } from '../../lib/records';
 import Stat from '../../components/Stat';
@@ -52,6 +54,7 @@ export default function ProfileScreen() {
   const { t } = useT();
   const { width } = useWindowDimensions();
   const { items, loadedAt } = useActivities();
+  const log = useWellness();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [filter, setFilter] = useState<Sport>('run');
   // writes still in flight; while typing, don't reload a half-saved copy over the field
@@ -63,6 +66,12 @@ export default function ProfileScreen() {
   }, []);
 
   const acts = useMemo(() => (items ?? []).filter((a) => a.sport === filter), [items, filter]);
+  // badges scan the whole history: compute once per data change, not on every keystroke below
+  const weightKg = profile?.weightKg || 70;
+  const badgesEarned = useMemo(
+    () => [...evaluateAchievements(items ?? []), ...wellnessBadges(log ?? {}, items ?? [], weightKg)].filter((x) => x.earned).length,
+    [items, log, weightKg],
+  );
 
   const weeks = useMemo(() => {
     const thisMon = mondayOf(loadedAt);
@@ -115,12 +124,15 @@ export default function ProfileScreen() {
         <View style={{ flex: 1 }}>
           <TextInput value={profile?.name ?? ''} onChangeText={(name) => update({ name })} placeholder="Your name"
             placeholderTextColor={C.muted} style={[F.h1, { fontSize: 24, padding: 0 }]} accessibilityLabel="Your name" />
+          <TextInput value={profile?.team ?? ''} onChangeText={(team) => update({ team })} placeholder="Team / department"
+            placeholderTextColor={C.muted} style={{ color: C.text, fontSize: 14, fontWeight: '600', padding: 0 }}
+            accessibilityLabel="Team or department" />
           <Text style={{ color: C.muted, fontSize: 13 }}>{(items ?? []).length} activities recorded</Text>
         </View>
       </NeuCard>
 
       <View style={{ flexDirection: 'row', gap: 16 }}>
-        <NeuTile icon="trophy-variant-outline" title="Badges" subtitle={`${evaluateAchievements(items ?? []).filter((x) => x.earned).length} earned`}
+        <NeuTile icon="trophy-variant-outline" title="Badges" subtitle={`${badgesEarned} earned`}
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/achievements')} />
         <NeuTile icon="map-legend" title="Heatmap" subtitle="All routes"
           style={{ flex: 1, paddingRight: 8 }} onPress={() => router.push('/heatmap')} />

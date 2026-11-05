@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "Stride",
+    "name": "TBDI FitTrack",
     "slug": "stride",
     "scheme": "stride",
-    "version": "1.2.0",
+    "version": "1.3.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -20,7 +20,7 @@
     "android": {
       "package": "com.lilesh.stride",
       "adaptiveIcon": {
-        "backgroundColor": "#E9EDF3",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -34,7 +34,7 @@
         "REQUEST_INSTALL_PACKAGES"
       ],
       "predictiveBackGestureEnabled": false,
-      "versionCode": 3
+      "versionCode": 8
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -44,13 +44,37 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Stride uses your location to record your route while an activity is running, even when the screen is off.",
-          "locationWhenInUsePermission": "Stride uses your location to record your route.",
+          "locationAlwaysAndWhenInUsePermission": "TBDI FitTrack uses your location to record your route while an activity is running, even when the screen is off.",
+          "locationWhenInUsePermission": "TBDI FitTrack uses your location to record your route.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TBDI FitTrack uses your photos to put your route and stats on top of them for sharing.",
+          "cameraPermission": "TBDI FitTrack uses the camera to take a photo for your activity story.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "TBDI FitTrack counts your steps during walks and runs."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "TBDI FitTrack saves your activity stickers and stories to your gallery.",
+          "savePhotosPermission": "TBDI FitTrack saves your activity stickers and stories to your gallery.",
+          "granularPermissions": [
+            "photo"
+          ]
+        }
+      ],
       "expo-notifications",
       "./plugins/withReleaseSigning",
       "./plugins/withAsyncStorageSize",
@@ -59,7 +83,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
-          "imageWidth": 180,
+          "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#E9EDF3",
           "dark": {
@@ -80,7 +104,8 @@
       "firebase": {
         "apiKey": "AIzaSyCmWgSnBdUQerKmM0mcf3xlqHcdmTAmXoQ",
         "projectId": "stribe-a8108"
-      }
+      },
+      "facebookAppId": ""
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",

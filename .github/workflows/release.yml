@@ -2,7 +2,8 @@
 #
 # Two ways to release:
 #   • GitHub → Actions → "Release APK" → Run workflow → enter a version like 1.2.0
-#     (bumps app.json, commits, tags, builds, publishes)
+#     (bumps app.json, commits, tags, builds, publishes). Tick "prerelease" for a test build that
+#     phones are not offered until you mark it as the latest release.
 #   • or push a tag yourself: git tag v1.2.0 && git push --tags
 #
 # The app's Settings → "Check for updates" reads the latest release and installs its APK.
@@ -23,6 +24,10 @@ on:
       notes:
         description: "What's new (shown in the app's update screen)"
         required: false
+      prerelease:
+        description: 'Test build: publish as a pre-release. Phones are not offered it until you mark it "latest".'
+        type: boolean
+        default: false
   push:
     tags: ['v*']
     # Changing the version in app.json on main also releases (no tag push needed)
@@ -135,8 +140,31 @@ jobs:
         if: env.SKIP != '1'
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release.apk "dist/stride-${TAG}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/tbdi-fittrack-${TAG}.apk"
           ls -lh dist
+
+      # The app reads releases/latest/download/update.json, which GitHub serves from its download CDN
+      # without the REST API's 60-requests-per-hour-per-IP limit (many phones share one office IP).
+      - name: Write update manifest
+        if: env.SKIP != '1'
+        env:
+          NOTES: ${{ inputs.notes }}
+          REPO: ${{ github.repository }}
+        run: |
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const { TAG, REPO, NOTES } = process.env;
+            const apk = `tbdi-fittrack-${TAG}.apk`, buf = fs.readFileSync(`dist/${apk}`);
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
+            const base = `https://github.com/${REPO}/releases`;
+            fs.writeFileSync("dist/update.json", JSON.stringify({
+              version: app.version, versionCode: app.android.versionCode, apk,
+              url: `${base}/download/${TAG}/${apk}`, page: `${base}/tag/${TAG}`,
+              size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+              notes: NOTES || "", publishedAt: new Date().toISOString(),
+            }, null, 2) + "\n");
+          '
+          cat dist/update.json
 
       - name: Publish GitHub release
         if: env.SKIP != '1'
@@ -144,7 +172,11 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Stride ${{ env.TAG }}
+          name: TBDI FitTrack ${{ env.TAG }}
           body: ${{ inputs.notes }}
+          # pre-releases never become "latest", so the in-app updater (releases/latest) ignores them
+          prerelease: ${{ inputs.prerelease == true }}
           generate_release_notes: true
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/update.json
