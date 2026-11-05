@@ -67,3 +67,46 @@ test('update.json: sha256 and signing fingerprint are read and normalised; key c
   assert.equal(needsReinstall(fromManifest({ ...m, signer: undefined }), DEBUG), false);
   assert.equal(needsReinstall(null, DEBUG), false);
 });
+
+test('key rotation: update.json lineage is parsed strictly; an app whose key is in it updates in place', async () => {
+  const { fromManifest, needsReinstall, parseLineage } = await import('./releaseInfo.ts');
+  const DEBUG = 'FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C';
+  const REL = '53:44:1A:53:D9:3B:29:D6:01:65:31:5E:8F:32:CA:99:E1:3F:3D:C4:F8:BE:75:1B:93:A6:1F:BF:91:6A:83:4B';
+  const LOST = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
+  const m = { version: '1.3.12', url: 'https://github.com/x/y/releases/download/v1.3.12/a.apk', signer: REL, lineage: [DEBUG, REL] };
+
+  // what the release workflow writes after `apksigner rotate` (debug key → release key)
+  const r = fromManifest(m)!;
+  assert.equal(r.signer, REL);
+  assert.deepEqual(r.lineage, [DEBUG, REL]);
+  // fingerprints are normalised like `signer` (case, separators)
+  assert.deepEqual(fromManifest({ ...m, lineage: [DEBUG.replace(/:/g, '').toLowerCase(), REL.toLowerCase()] })!.lineage, [DEBUG, REL]);
+  // longer chains (a second rotation later) are fine
+  assert.deepEqual(parseLineage([DEBUG, LOST, REL], REL), [DEBUG, LOST, REL]);
+
+  // anything odd is ignored as a whole
+  for (const bad of [
+    undefined, null, 'FA:C6', {}, [], [REL], // missing, not a list, nothing to rotate from
+    [DEBUG, 'junk', REL], [DEBUG, 42, REL], // a junk entry
+    [REL, DEBUG], [DEBUG, LOST], // the last entry must be the signer
+    [DEBUG, DEBUG, REL], [REL, REL], // repeated keys
+  ]) assert.equal(fromManifest({ ...m, lineage: bad })!.lineage, undefined, JSON.stringify(bad));
+  assert.equal(parseLineage([DEBUG, REL], ''), undefined); // no signer, no lineage
+  assert.equal(fromManifest({ ...m, signer: 'abc' })!.lineage, undefined);
+
+  // the switch from the debug key installs in place: the phone's key is in the lineage
+  assert.equal(needsReinstall(r, DEBUG), false);
+  assert.equal(needsReinstall(r, DEBUG.toLowerCase()), false);
+  // later releases with the same key, after the switch
+  assert.equal(needsReinstall(r, REL), false);
+  // a key that is not in the lineage still needs the one-time reinstall
+  assert.equal(needsReinstall(r, LOST), true);
+  // a key change without a lineage (or with a broken one) needs it too
+  assert.equal(needsReinstall(fromManifest({ ...m, lineage: undefined }), DEBUG), true);
+  assert.equal(needsReinstall(fromManifest({ ...m, lineage: [DEBUG, 'junk', REL] }), DEBUG), true);
+  // going back to the debug key after the switch is a rollback the lineage does not allow
+  assert.equal(needsReinstall(fromManifest({ ...m, signer: DEBUG, lineage: undefined }), REL), true);
+  // unknown on either side: normal update
+  assert.equal(needsReinstall(r, ''), false);
+  assert.equal(needsReinstall(fromManifest({ ...m, signer: undefined }), DEBUG), false);
+});

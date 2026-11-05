@@ -1,6 +1,9 @@
 // Expo config plugin: sign release builds with a keystore supplied through environment variables
-// (set from GitHub Actions secrets). Without them the build falls back to the template's fixed
-// debug keystore, which is still the same on every build so in-app updates keep installing.
+// (STRIDE_KEYSTORE_*). Without them the build uses the template's fixed debug keystore, which is the same on
+// every build so in-app updates keep installing. The release workflow deliberately leaves them unset: Gradle
+// signs with the debug key and scripts/sign-apk-rotation.sh then adds the release key with v3 key rotation, so
+// installed apps move to it in place. Signing directly with another key here is a key change without a
+// lineage, which every phone would have to reinstall for; use it only for local experiments.
 const { withAppBuildGradle } = require('expo/config-plugins');
 
 const MARK = '// stride-release-signing';
