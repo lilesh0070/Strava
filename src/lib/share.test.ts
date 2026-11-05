@@ -26,7 +26,9 @@ test('route shape keeps the true proportions and fits the box', () => {
 });
 
 test('share stats: pace only where it makes sense, formatted values', () => {
-  assert.deepEqual(defaultStats(run()), ['distance', 'time', 'pace', 'speed']);
+  assert.deepEqual(defaultStats(run()), ['distance', 'time', 'pace', 'speed', 'steps']);
+  assert.deepEqual(statValue(run({ steps: 5321 }), 'steps'), { value: '5,321', unit: '' });
+  assert.equal(statValue(run(), 'steps').value.startsWith('≈'), true); // estimated
   assert.deepEqual(defaultStats(run({ sport: 'ride' })), ['distance', 'time', 'speed']);
   assert.ok(availableStats(run({ elevGainM: 40 })).includes('elevation'));
   assert.ok(!availableStats(run()).includes('elevation'));

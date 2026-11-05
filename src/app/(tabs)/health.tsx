@@ -17,6 +17,7 @@ import {
   waterGoalMl, weekSummary, type CheckIn, type Insight, type ScorePartKey,
 } from '../../lib/health';
 import { useT } from '../../lib/i18n';
+import { activitySteps, fmtSteps } from '../../lib/steps';
 import { getProfile, getSettings, type Profile } from '../../lib/storage';
 import type { Key } from '../../lib/strings';
 import { useTheme } from '../../lib/theme';
@@ -138,6 +139,8 @@ export default function HealthScreen() {
   const weight = profile?.weightKg || 70;
   const day = log?.[today] ?? emptyDay();
   const activeMin = Math.round(minutes[today] ?? 0);
+  const stepsToday = useMemo(() => acts.filter((a) => dayKey(a.startedAt) === today)
+    .reduce((s, a) => s + (activitySteps(a)?.steps ?? 0), 0), [acts, today]);
   const goal = waterGoalMl(weight, activeMin);
   const score = dailyScore(day, activeMin, goal);
   const streak = useMemo(() => (log ? scoreStreak(log, minutes, weight, today) : 0), [log, minutes, weight, today]);
@@ -229,6 +232,12 @@ export default function HealthScreen() {
           <SectionTitle icon="run" title={t('h.move')} sub={fill(t('h.moveSub'), { n: activeMin, w: weekMin })}
             right={<NeuButton small icon="record-circle-outline" label={t('h.record')} onPress={() => router.navigate('/record')} />} />
           <NeuProgress value={weekMin / WHO_WEEKLY_MIN} />
+          {stepsToday > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <MaterialCommunityIcons name="shoe-print" size={16} color={C.accent} />
+              <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>{fill(t('h.stepsToday'), { n: fmtSteps(stepsToday) })}</Text>
+            </View>
+          )}
         </NeuCard>
 
         {/* quick breaks */}

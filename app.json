@@ -60,6 +60,12 @@
         }
       ],
       [
+        "expo-sensors",
+        {
+          "motionPermission": "TBDI FitTrack counts your steps during walks and runs."
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "TBDI FitTrack saves your activity stickers and stories to your gallery.",

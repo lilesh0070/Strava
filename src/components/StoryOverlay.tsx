@@ -3,7 +3,7 @@
 // `width`, so the on-screen preview and the full-resolution export look identical.
 import { forwardRef, useMemo } from 'react';
 import { Text, View, type TextStyle } from 'react-native';
-import Svg, { Circle, Polyline } from 'react-native-svg';
+import Svg, { Polyline } from 'react-native-svg';
 import { simplify, type Point } from '../lib/geo';
 import { useT } from '../lib/i18n';
 import { projectRoute, routeAspect } from '../lib/routeShape';
@@ -60,7 +60,6 @@ const StoryOverlay = forwardRef<ShareCardHandle, Props>(function StoryOverlay(
           {shape.lines.map((pts, i) => (
             <Polyline key={`l${i}`} points={pts} fill="none" stroke={routeColor} strokeWidth={line} strokeLinejoin="round" strokeLinecap="round" />
           ))}
-          <Circle cx={shape.last[0]} cy={shape.last[1]} r={line * 0.9} fill={routeColor} stroke={fg} strokeWidth={2 * k} />
         </Svg>
       )}
       {rows.map((row, r) => (

@@ -10,6 +10,7 @@ import RouteMap from '../../components/RouteMap';
 import Stat from '../../components/Stat';
 import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, splits } from '../../lib/geo';
 import { estimateCalories } from '../../lib/calories';
+import { activitySteps, cadence, fmtSteps } from '../../lib/steps';
 import PaceChart from '../../components/PaceChart';
 import { deleteActivity, getActivity, getProfile, saveActivity } from '../../lib/storage';
 import { shareGpx } from '../../lib/exportGpx';
@@ -131,6 +132,15 @@ export default function ActivityDetail() {
                 ? <Stat label="Max speed" value={(a.maxSpeedMs * 3.6).toFixed(1)} unit="km/h" />
                 : <Stat label="Effort" value={a.effort ? `${a.effort}/10` : '–'} />}
             </View>
+            {(() => {
+              const st = activitySteps(a), cad = cadence(a);
+              return st ? (
+                <View style={{ flexDirection: 'row' }}>
+                  <Stat label={st.estimated ? 'Steps (est.)' : 'Steps'} value={`${st.estimated ? '≈' : ''}${fmtSteps(st.steps)}`} />
+                  <Stat label="Cadence" value={cad ? String(cad) : '–'} unit="spm" />
+                </View>
+              ) : null;
+            })()}
             {a.manual ? <Text style={{ color: C.muted, fontSize: 12 }}>Added manually · no GPS route</Text> : null}
           </NeuCard>
 

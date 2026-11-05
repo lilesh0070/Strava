@@ -30,6 +30,8 @@ export type Activity = {
   maxSpeedMs?: number;
   manual?: boolean; // entered by hand (treadmill, gym, forgot to record)
   workoutName?: string;
+  /** Steps counted by the phone's step sensor during the recording (absent: estimate from distance). */
+  steps?: number;
   /** Present on list summaries: segments are simplified for drawing, best efforts are pre-computed. */
   lite?: boolean;
   efforts?: Record<string, number>; // metres → fastest seconds
@@ -82,6 +84,7 @@ export type Session = {
   lastPaceAlertAt?: number;
   maxSpeedMs?: number;
   workout?: WorkoutProgress | null;
+  steps?: number; // counted while recording (not while paused)
 };
 
 export function sessionMovingSec(s: Session, now = Date.now()): number {

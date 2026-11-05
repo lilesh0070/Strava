@@ -9,6 +9,7 @@ import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed, totalDistance } from '../../lib/geo';
+import { fmtSteps, isOnFoot } from '../../lib/steps';
 import { gpsHealth, lapsFromMarks } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
 import { newRecords } from '../../lib/records';
@@ -126,6 +127,8 @@ export default function Record() {
       ));
       if (!go) return;
     }
+    // step counter: the "Physical activity" permission is asked once, on the first walk or run
+    if (isOnFoot(sport)) await tracker.ensureStepPermission();
     if (!(await getSettings()).countdown) return begin();
     let n = 3;
     setCountdown(n);
@@ -158,7 +161,12 @@ export default function Record() {
         text: t('rec.save'),
         onPress: async () => {
           const before = await listActivities().catch(() => []);
-          const a = await tracker.finish();
+          let a;
+          try { a = await tracker.finish(); } catch (e) {
+            // the recording is kept (paused); nothing is lost
+            Alert.alert('Could not save yet', `Your recording is safe. Please tap Save again.\n\n${String((e as Error)?.message ?? e)}`);
+            return;
+          }
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
           if (!a) return;
           router.push(`/activity/${a.id}`);
@@ -233,6 +241,13 @@ export default function Record() {
               <Stat label={`${t('rec.lap')} ${lapRows.length || 1}`} value={openLap ? fmtDuration(openLap.durationSec) : '0:00'} />
               <Stat label={t('rec.lapDist')} value={openLap ? fmtKm(openLap.distanceM) : '0.00'} unit="km" />
             </View>
+            {isOnFoot(active.sport) && active.steps != null && (
+              <View style={{ flexDirection: 'row' }}>
+                <Stat label={t('rec.steps')} value={fmtSteps(active.steps)} />
+                <Stat label={t('rec.cadence')} value={moving >= 60 && active.steps ? String(Math.round(active.steps / (moving / 60))) : '–'} unit="spm" />
+                <View style={{ flex: 1 }} />
+              </View>
+            )}
             {(() => {
               const w = findWorkout(active.workout?.workoutId);
               if (!w || !active.workout) return null;

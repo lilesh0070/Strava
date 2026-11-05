@@ -3,7 +3,7 @@
 export type Lang = 'en' | 'hi';
 
 const en = {
-  'tab.feed': 'Feed', 'tab.record': 'Record', 'tab.you': 'You',
+  'tab.feed': 'History', 'tab.record': 'Record', 'tab.you': 'You',
   'feed.thisWeek': 'This week', 'feed.activities': 'activities', 'feed.search': 'Search activities', 'feed.all': 'All',
   'feed.emptyTitle': 'No activities yet', 'feed.emptyBody': 'Record your first run, ride or walk and it will show up here.',
   'feed.start': 'Start recording', 'feed.noMatch': 'No activities match.',
@@ -15,7 +15,7 @@ const en = {
   'rec.finishQ': 'Finish activity?', 'rec.resume': 'Resume', 'rec.discard': 'Discard', 'rec.save': 'Save', 'rec.cancel': 'Cancel',
   'rec.weakTitle': 'GPS signal is weak', 'rec.noGpsTitle': 'No GPS signal yet',
   'rec.weakBody': 'Your route may be inaccurate for the first minute. Waiting a few seconds in open sky usually fixes it.',
-  'rec.wait': 'Wait', 'rec.anyway': 'Start anyway', 'rec.nice': 'Nice work!',
+  'rec.wait': 'Wait', 'rec.anyway': 'Start anyway', 'rec.nice': 'Nice work!', 'rec.steps': 'Steps', 'rec.cadence': 'Cadence',
   'rec.approx': 'Approximate location · tap to fix', 'rec.locOff': 'Location is off · tap to fix',
   'rec.approxTitle': 'Precise location is off',
   'rec.approxBody': 'TBDI FitTrack only gets an approximate position, so your route and distance can be off by hundreds of metres. Turn on “Use precise location” for TBDI FitTrack.',
@@ -40,7 +40,7 @@ const en = {
   'h.streak': '{n}-day streak', 'h.streakNone': 'Score 50+ today to start a streak',
   'h.part.move': 'Move', 'h.part.water': 'Water', 'h.part.breaks': 'Breaks', 'h.part.mind': 'Mind', 'h.part.checkin': 'Check-in',
   'h.water': 'Water', 'h.waterSub': '{ml} of {goal} ml · goal from your weight and activity', 'h.addGlass': 'Glass',
-  'h.move': 'Active minutes', 'h.moveSub': '{n} min today · {w} of 150 min this week (WHO goal)', 'h.record': 'Record',
+  'h.move': 'Active minutes', 'h.stepsToday': '{n} steps today from your walks and runs', 'h.moveSub': '{n} min today · {w} of 150 min this week (WHO goal)', 'h.record': 'Record',
   'h.quick': 'Quick breaks', 'h.stretch': 'Desk stretch', 'h.stretchSub': '3 min', 'h.breathe': 'Breathe', 'h.breatheSub': '1–3 min',
   'h.eyes': 'Eye break', 'h.eyesSub': '20 s', 'h.breaksToday': '{n} of 4 breaks today',
   'h.checkin': 'Daily check-in', 'h.checkinQ': 'How are you today?', 'h.mood': 'Mood', 'h.energy': 'Energy',
@@ -94,7 +94,7 @@ const en = {
   'sh.title': 'Share', 'sh.bg': 'Background', 'sh.bgNone': 'Sticker', 'sh.bgPhoto': 'Photo', 'sh.bgColor': 'Colour',
   'sh.gallery': 'Gallery', 'sh.camera': 'Camera', 'sh.layout': 'Layout', 'sh.full': 'Route + stats', 'sh.stats': 'Stats', 'sh.route': 'Route',
   'sh.text': 'Text', 'sh.white': 'White', 'sh.dark': 'Dark', 'sh.size': 'Size', 'sh.show': 'Show',
-  'sh.distance': 'Distance', 'sh.time': 'Time', 'sh.pace': 'Avg pace', 'sh.speed': 'Avg speed', 'sh.elevation': 'Elev gain', 'sh.calories': 'Calories',
+  'sh.distance': 'Distance', 'sh.time': 'Time', 'sh.pace': 'Avg pace', 'sh.speed': 'Avg speed', 'sh.steps': 'Steps', 'sh.elevation': 'Elev gain', 'sh.calories': 'Calories',
   'sh.name': 'Title', 'sh.logo': 'Logo', 'sh.share': 'Share', 'sh.save': 'Save', 'sh.saveSticker': 'Save sticker',
   'sh.saved': 'Saved to your gallery', 'sh.drag': 'Drag the sticker to move it',
   'sh.howTitle': 'Put it on any Instagram story (photo or video)',
@@ -105,7 +105,7 @@ const en = {
 export type Key = keyof typeof en;
 
 const hi: Partial<Record<Key, string>> = {
-  'tab.feed': 'फ़ीड', 'tab.record': 'रिकॉर्ड', 'tab.you': 'आप',
+  'tab.feed': 'इतिहास', 'tab.record': 'रिकॉर्ड', 'tab.you': 'आप',
   'feed.thisWeek': 'इस हफ़्ते', 'feed.activities': 'एक्टिविटी', 'feed.search': 'एक्टिविटी खोजें', 'feed.all': 'सभी',
   'feed.emptyTitle': 'अभी कोई एक्टिविटी नहीं', 'feed.emptyBody': 'अपनी पहली दौड़, राइड या वॉक रिकॉर्ड करें, वह यहाँ दिखेगी।',
   'feed.start': 'रिकॉर्डिंग शुरू करें', 'feed.noMatch': 'कोई एक्टिविटी नहीं मिली।',
@@ -117,7 +117,7 @@ const hi: Partial<Record<Key, string>> = {
   'rec.finishQ': 'एक्टिविटी ख़त्म करें?', 'rec.resume': 'जारी रखें', 'rec.discard': 'हटाएँ', 'rec.save': 'सेव करें', 'rec.cancel': 'रद्द करें',
   'rec.weakTitle': 'GPS सिग्नल कमज़ोर है', 'rec.noGpsTitle': 'अभी GPS सिग्नल नहीं',
   'rec.weakBody': 'पहले एक मिनट रास्ता थोड़ा ग़लत हो सकता है। खुले आसमान में कुछ सेकंड रुकने से आमतौर पर ठीक हो जाता है।',
-  'rec.wait': 'रुकें', 'rec.anyway': 'फिर भी शुरू करें', 'rec.nice': 'शाबाश!',
+  'rec.wait': 'रुकें', 'rec.anyway': 'फिर भी शुरू करें', 'rec.nice': 'शाबाश!', 'rec.steps': 'कदम', 'rec.cadence': 'कैडेंस',
   'rec.approx': 'अनुमानित लोकेशन · ठीक करने के लिए टैप करें', 'rec.locOff': 'लोकेशन बंद है · ठीक करने के लिए टैप करें',
   'rec.approxTitle': 'सटीक लोकेशन बंद है',
   'rec.approxBody': 'TBDI FitTrack को सिर्फ़ अनुमानित लोकेशन मिल रही है, इसलिए रास्ता और दूरी सैकड़ों मीटर ग़लत हो सकती है। TBDI FitTrack के लिए “सटीक लोकेशन” चालू करें।',
@@ -142,7 +142,7 @@ const hi: Partial<Record<Key, string>> = {
   'h.streak': '{n} दिन लगातार', 'h.streakNone': 'आज 50+ स्कोर करके सिलसिला शुरू करें',
   'h.part.move': 'चलना', 'h.part.water': 'पानी', 'h.part.breaks': 'ब्रेक', 'h.part.mind': 'मन', 'h.part.checkin': 'चेक-इन',
   'h.water': 'पानी', 'h.waterSub': '{ml} / {goal} ml · आपके वज़न और एक्टिविटी के हिसाब से', 'h.addGlass': 'गिलास',
-  'h.move': 'एक्टिव मिनट', 'h.moveSub': 'आज {n} मिनट · इस हफ़्ते {w}/150 मिनट (WHO लक्ष्य)', 'h.record': 'रिकॉर्ड',
+  'h.move': 'एक्टिव मिनट', 'h.stepsToday': 'आज की वॉक और रन से {n} कदम', 'h.moveSub': 'आज {n} मिनट · इस हफ़्ते {w}/150 मिनट (WHO लक्ष्य)', 'h.record': 'रिकॉर्ड',
   'h.quick': 'छोटे ब्रेक', 'h.stretch': 'डेस्क स्ट्रेच', 'h.stretchSub': '3 मिनट', 'h.breathe': 'साँस', 'h.breatheSub': '1–3 मिनट',
   'h.eyes': 'आँखों का ब्रेक', 'h.eyesSub': '20 सेकंड', 'h.breaksToday': 'आज 4 में से {n} ब्रेक',
   'h.checkin': 'रोज़ का चेक-इन', 'h.checkinQ': 'आज आप कैसे हैं?', 'h.mood': 'मूड', 'h.energy': 'ऊर्जा',
@@ -196,7 +196,7 @@ const hi: Partial<Record<Key, string>> = {
   'sh.title': 'शेयर करें', 'sh.bg': 'बैकग्राउंड', 'sh.bgNone': 'स्टिकर', 'sh.bgPhoto': 'फ़ोटो', 'sh.bgColor': 'रंग',
   'sh.gallery': 'गैलरी', 'sh.camera': 'कैमरा', 'sh.layout': 'लेआउट', 'sh.full': 'रास्ता + डेटा', 'sh.stats': 'डेटा', 'sh.route': 'रास्ता',
   'sh.text': 'टेक्स्ट', 'sh.white': 'सफ़ेद', 'sh.dark': 'गहरा', 'sh.size': 'साइज़', 'sh.show': 'दिखाएँ',
-  'sh.distance': 'दूरी', 'sh.time': 'समय', 'sh.pace': 'औसत पेस', 'sh.speed': 'औसत स्पीड', 'sh.elevation': 'चढ़ाई', 'sh.calories': 'कैलोरी',
+  'sh.distance': 'दूरी', 'sh.time': 'समय', 'sh.pace': 'औसत पेस', 'sh.speed': 'औसत स्पीड', 'sh.steps': 'कदम', 'sh.elevation': 'चढ़ाई', 'sh.calories': 'कैलोरी',
   'sh.name': 'नाम', 'sh.logo': 'लोगो', 'sh.share': 'शेयर करें', 'sh.save': 'सेव करें', 'sh.saveSticker': 'स्टिकर सेव करें',
   'sh.saved': 'गैलरी में सेव हो गया', 'sh.drag': 'स्टिकर को खींचकर जगह बदलें',
   'sh.howTitle': 'किसी भी इंस्टाग्राम स्टोरी (फ़ोटो या वीडियो) पर लगाएँ',

@@ -1,23 +1,25 @@
 // Numbers shown on the share sticker / story. Pure so it is unit-tested.
 import { estimateCalories } from './calories';
 import { fmtDuration, fmtKm, fmtPace, fmtSpeed } from './geo';
+import { activitySteps, fmtSteps } from './steps';
 import { sportInfo, type Activity } from './types';
 
-export type ShareStatKey = 'distance' | 'time' | 'pace' | 'speed' | 'elevation' | 'calories';
+export type ShareStatKey = 'distance' | 'time' | 'pace' | 'speed' | 'steps' | 'elevation' | 'calories';
 
 /** Stats that make sense for this activity (no pace for rides, no climb on a flat route). */
 export function availableStats(a: Activity): ShareStatKey[] {
   const out: ShareStatKey[] = ['distance', 'time'];
   if (sportInfo(a.sport).usesPace) out.push('pace');
   out.push('speed');
+  if (activitySteps(a)) out.push('steps');
   if (a.elevGainM > 0) out.push('elevation');
   out.push('calories');
   return out;
 }
 
-/** What a sticker shows by default: distance, time, average pace (runs/walks/hikes) and average speed. */
+/** What a sticker shows by default: distance, time, average pace and steps (on foot), average speed. */
 export function defaultStats(a: Activity): ShareStatKey[] {
-  return availableStats(a).filter((k) => k === 'distance' || k === 'time' || k === 'pace' || k === 'speed');
+  return availableStats(a).filter((k) => k === 'distance' || k === 'time' || k === 'pace' || k === 'speed' || k === 'steps');
 }
 
 export function statValue(a: Activity, key: ShareStatKey, weightKg = 70): { value: string; unit: string } {
@@ -26,6 +28,7 @@ export function statValue(a: Activity, key: ShareStatKey, weightKg = 70): { valu
     case 'time': return { value: fmtDuration(a.movingSec), unit: '' };
     case 'pace': return { value: fmtPace(a.distanceM, a.movingSec), unit: '/km' };
     case 'speed': return { value: fmtSpeed(a.distanceM, a.movingSec), unit: 'km/h' };
+    case 'steps': { const s = activitySteps(a); return { value: s ? `${s.estimated ? '≈' : ''}${fmtSteps(s.steps)}` : '–', unit: '' }; }
     case 'elevation': return { value: String(Math.round(a.elevGainM)), unit: 'm' };
     case 'calories': return { value: String(estimateCalories(a.sport, a.distanceM, a.movingSec, weightKg)), unit: 'kcal' };
   }

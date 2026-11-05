@@ -44,8 +44,16 @@ Wellbeing guidance only, not medical advice.
 - **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service / iOS background location).
 - **Crash-safe sessions.** The current recording is saved to storage, so if the app is killed it picks up where it left off.
 - **GPS cleanup.** Drops low-accuracy fixes, stale cached fixes, standing-still jitter and multipath jumps.
+- **Steps.** Counted by the phone's hardware step counter during walks, runs and hikes (not while paused), with live steps and cadence. Older activities show an estimate from distance and speed, marked "≈".
+- **Your data is kept safe.**
+  - Every activity, with all its GPS points, is stored as its own file.
+  - There is no size limit (AsyncStorage on Android caps the whole database at 6 MB).
+  - Writes are crash-safe.
+  - Files are included in Android's automatic backup.
+  - A recording is only cleared once its activity is safely saved.
+  - Existing activities move over automatically on first launch.
 - **Maps.** Uses Leaflet with OpenStreetMap tiles, so no API key is needed.
-- **Feed.** A weekly summary plus activity cards with route previews.
+- **History.** Every activity ever recorded, newest first and grouped by month with totals (km, steps). Tap one to open it, or tap its share button to post it. Search and sport filters included.
 - **Activity detail.** Route map, moving/elapsed time, elevation gain and profile, per-km splits, rename and delete.
 - **Voice updates.** Announces time and pace (or speed) at every kilometre.
 - **Auto-pause.** Optional. Pauses when you stop moving and resumes when you set off again.
@@ -90,7 +98,7 @@ Wellbeing guidance only, not medical advice.
 - **Personal records.** Fastest 1k/5k/10k/half, longest, biggest climb. Shown as 🏆 chips and in a pop-up when you beat one.
 - **Weekly insights.** This week vs the same point last week (km, time, % change).
 - **Monthly goal ring** on the You tab.
-- **Share to Instagram stories and anywhere else.** From any activity, tap Share:
+- **Share to Instagram stories and anywhere else.** From any activity (or its card in History), tap Share. The route is drawn as one clean orange line, with no start or end markers:
   - **Sticker:** a transparent PNG with the same orange route line and your stats (distance, time, average pace and speed, plus optional climb, calories and title). Save it, then add it in Instagram with *Stickers → Photo*, on top of any story photo or **video**.
   - **Photo story:** pick a photo or take one, drag the sticker into place and share a sharp 1080×1920 story to Instagram, WhatsApp or any app.
   - **Classic card:** the neumorphic summary card.

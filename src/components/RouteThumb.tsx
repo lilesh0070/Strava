@@ -1,6 +1,6 @@
 // Lightweight route preview drawn with SVG (cheap enough for long lists, unlike a WebView map).
 import { memo, useMemo } from 'react';
-import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
+import Svg, { Polyline, Rect } from 'react-native-svg';
 import type { Point } from '../lib/geo';
 import { projectRoute } from '../lib/routeShape';
 import { useTheme } from '../lib/theme';
@@ -14,8 +14,6 @@ function RouteThumb({ segments, width, height }: { segments: Point[][]; width: n
       {shape?.lines.map((pts, i) => (
         <Polyline key={i} points={pts} fill="none" stroke={C.route} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
       ))}
-      {shape ? <Circle cx={shape.first[0]} cy={shape.first[1]} r={4} fill={C.success} /> : null}
-      {shape ? <Circle cx={shape.last[0]} cy={shape.last[1]} r={4} fill={C.danger} /> : null}
     </Svg>
   );
 }

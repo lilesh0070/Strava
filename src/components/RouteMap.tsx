@@ -47,7 +47,6 @@ window.reset=function(d){
   lines.clearLayers();marks.clearLayers();polys=[];
   var all=[];
   d.segs.forEach(function(s,i){ polys[i]=L.polyline(s,style).addTo(lines); all=all.concat(s); });
-  if(!d.follow && all.length){ dot(all[0],'${C.success}').addTo(marks); dot(all[all.length-1],'${C.danger}').addTo(marks); }
   setCur(d.cur,d.follow);
   if(!d.follow && all.length>1 && !fitted){ map.fitBounds(L.latLngBounds(all),{padding:[30,30]}); fitted=true; }
   else if(!d.follow && all.length===1 && !fitted){ map.setView(all[0],15); fitted=true; }

@@ -10,6 +10,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { AppState, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Pedometer } from 'expo-sensors';
 import * as Speech from 'expo-speech';
 import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
@@ -17,6 +18,8 @@ import { advance, findWorkout, startProgress, stepCue } from './workouts';
 import { STOPPED_MS, kalmanStep, lapsFromMarks, paceAdvice, processNoise, rollingSpeed, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
+import { readBlob, removeBlob, writeBlob } from './blobStore';
+import { isOnFoot, stepDelta } from './steps';
 import { defaultGear, getSettings, saveActivity } from './storage';
 import {
   DEFAULT_SETTINGS, defaultName, gearKindFor, sessionMovingSec, sportInfo,
@@ -73,16 +76,19 @@ export const getSession = () => session;
 export const getLastFix = () => lastFix;
 export const getLastFixAt = () => lastFixAt;
 
+// The live recording is kept in a file (a long ride's GPS points outgrow AsyncStorage's per-value
+// limit on Android); older versions kept it in AsyncStorage, which is still read once after an update.
+const SESSION_BLOB = 'session';
 async function load() {
   if (loaded) return;
-  const raw = await AsyncStorage.getItem(SESSION_KEY);
+  const raw = (await readBlob(SESSION_BLOB).catch(() => null)) ?? (await AsyncStorage.getItem(SESSION_KEY).catch(() => null));
   session = raw ? JSON.parse(raw) : null;
   loaded = true;
 }
 async function persist() {
   lastPersistAt = Date.now();
-  if (session) await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else await AsyncStorage.removeItem(SESSION_KEY);
+  if (session) await writeBlob(SESSION_BLOB, JSON.stringify(session));
+  else { await removeBlob(SESSION_BLOB); await AsyncStorage.removeItem(SESSION_KEY).catch(() => undefined); }
 }
 /** Writing the whole session every second is the biggest CPU/battery cost after GPS; throttle it. */
 async function persistSoon() {
@@ -260,10 +266,43 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(LOCATION_TASK, 
   await ingest(data.locations);
 });
 
+// ---------- steps ----------
+// The phone's hardware step counter (almost no battery). Its readings are a running total since we
+// subscribed; only the increase while recording is added, so paused time doesn't count.
+let stepSub: { remove(): void } | null = null;
+let stepLast: number | null = null;
+async function startSteps() {
+  if (stepSub || !session || !isOnFoot(session.sport)) return;
+  try {
+    if (!(await Pedometer.isAvailableAsync()) || !(await Pedometer.getPermissionsAsync()).granted) return;
+    if (!session || stepSub) return;
+    session.steps ??= 0;
+    stepLast = null;
+    stepSub = Pedometer.watchStepCount(({ steps }) => {
+      const d = stepDelta(stepLast, steps);
+      stepLast = steps;
+      if (session && session.status === 'recording' && d > 0) session.steps = (session.steps ?? 0) + d; // shown on the next 1 s tick
+    });
+  } catch { /* no step sensor: activities fall back to an estimate */ }
+}
+function stopSteps() { stepSub?.remove(); stepSub = null; stepLast = null; }
+export const currentSteps = () => session?.steps;
+
+/** Ask once for the "Physical activity" permission the step counter needs (Android 10+). */
+export async function ensureStepPermission(): Promise<boolean> {
+  try {
+    if (!(await Pedometer.isAvailableAsync())) return false;
+    const p = await Pedometer.getPermissionsAsync();
+    if (p.granted) return true;
+    return p.canAskAgain ? (await Pedometer.requestPermissionsAsync()).granted : false;
+  } catch { return false; }
+}
+
 export async function restore(): Promise<Session | null> {
   await locked(load);
   if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
   if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
+  if (session) startSteps();
   syncWarm();
   notify();
   return session;
@@ -444,6 +483,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
   lastFixAt = Date.now();
   restartedAt = Date.now();
   await startUpdates();
+  startSteps();
   syncWarm(); // the recording's own updates take over from the pre-start GPS
   const w = findWorkout(workoutId);
   if (w && session?.workout) say(`${w.name}. ${stepCue(w, session.workout)}`, 'en');
@@ -477,6 +517,7 @@ export function resume() {
 
 export async function discard() {
   Speech.stop();
+  stopSteps();
   await stopUpdates();
   await locked(async () => { session = null; await persist(); });
   syncWarm();
@@ -485,6 +526,7 @@ export async function discard() {
 
 export async function finish(): Promise<Activity | null> {
   Speech.stop();
+  stopSteps();
   await stopUpdates();
   const gear = session ? await defaultGear(gearKindFor(session.sport)).catch(() => undefined) : undefined;
   const activity = await locked(async () => {
@@ -508,12 +550,22 @@ export async function finish(): Promise<Activity | null> {
       laps: s.laps?.length ? lapsFromMarks(s.laps, distanceM, movingSec) : undefined,
       maxSpeedMs: s.maxSpeedMs,
       workoutName: findWorkout(s.workout?.workoutId)?.name,
+      steps: isOnFoot(s.sport) && s.steps ? s.steps : undefined,
     };
+    // Save first, clear the recording only once the activity is safely stored. If saving fails
+    // the recording stays (paused) so nothing is lost and Save can simply be tried again.
+    try {
+      await saveActivity(a);
+    } catch (e) {
+      if (s.status === 'recording') { s.status = 'paused'; s.autoPaused = false; s.pauseStartedAt = now; }
+      await persist().catch(() => undefined);
+      throw e;
+    }
     session = null;
     await persist();
     return a;
   });
-  if (activity) { await saveActivity(activity); autoSync(); }
+  if (activity) autoSync();
   syncWarm();
   notify();
   return activity;

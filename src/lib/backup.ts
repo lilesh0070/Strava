@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { blobBytes } from './blobStore';
 import { getProfile, getSettings, listFullActivities, notifyDataChanged, listGear, saveActivity, saveGearList, saveProfile, saveSettings } from './storage';
 import type { WellnessLog } from './health';
 import type { Activity } from './types';
@@ -42,7 +43,7 @@ export async function exportBackup(): Promise<number> {
   const { json, count } = await buildBackup();
   const file = new File(Paths.cache, `tbdi-fittrack-backup-${new Date().toISOString().slice(0, 10)}.json`);
   file.create({ overwrite: true });
-  file.write(json);
+  await file.write(json); // async in SDK 58: share only once the file is complete
   await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save TBDI FitTrack backup' });
   return count;
 }
@@ -57,5 +58,5 @@ export async function importBackup(): Promise<number | null> {
 export async function storageBytes(): Promise<number> {
   const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('stride:'));
   const rows = await AsyncStorage.multiGet(keys);
-  return rows.reduce((s, [k, v]) => s + k.length + (v?.length ?? 0), 0);
+  return rows.reduce((s, [k, v]) => s + k.length + (v?.length ?? 0), 0) + blobBytes();
 }
