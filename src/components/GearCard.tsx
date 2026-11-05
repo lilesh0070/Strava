@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { fmtKm } from '../lib/geo';
+import { useT } from '../lib/i18n';
 import { listGear, onDataChanged, updateGear } from '../lib/storage';
 import { useTheme } from '../lib/theme';
 import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress } from './Neu';
@@ -8,6 +9,7 @@ import { DEFAULT_SHOE_LIMIT_KM, type Activity, type Gear, type GearKind } from '
 
 export default function GearCard({ activities }: { activities: Activity[] }) {
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const [gear, setGear] = useState<Gear[]>([]);
   const [draft, setDraft] = useState('');
   const [kind, setKind] = useState<GearKind>('shoes');
@@ -30,10 +32,10 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
   };
 
   const menu = (g: Gear) => Alert.alert(g.name, undefined, [
-    { text: 'Make default', onPress: () => save((list) => list.map((x) => (x.kind === g.kind ? { ...x, isDefault: x.id === g.id } : x))) },
-    { text: g.retired ? 'Un-retire' : 'Retire', onPress: () => save((list) => list.map((x) => (x.id === g.id ? { ...x, retired: !x.retired, isDefault: false } : x))) },
-    { text: 'Delete', style: 'destructive', onPress: () => save((list) => list.filter((x) => x.id !== g.id)) },
-    { text: 'Cancel', style: 'cancel' },
+    { text: t('gear.makeDefault'), onPress: () => save((list) => list.map((x) => (x.kind === g.kind ? { ...x, isDefault: x.id === g.id } : x))) },
+    { text: g.retired ? t('gear.unretire') : t('gear.retire'), onPress: () => save((list) => list.map((x) => (x.id === g.id ? { ...x, retired: !x.retired, isDefault: false } : x))) },
+    { text: t('gear.delete'), style: 'destructive', onPress: () => save((list) => list.filter((x) => x.id !== g.id)) },
+    { text: t('gear.cancel'), style: 'cancel' },
   ]);
 
   const used = (id: string) => activities.filter((a) => a.gearId === id).reduce((s, a) => s + a.distanceM, 0);
@@ -42,9 +44,9 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
     <NeuCard radius={28} style={{ gap: 16 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <IconWell icon="shoe-sneaker" />
-        <Text style={F.h2}>Gear</Text>
+        <Text style={F.h2}>{t('gear.title')}</Text>
       </View>
-      {gear.length === 0 && <Text style={{ color: C.muted }}>Add your shoes or bike to see how far they have gone.</Text>}
+      {gear.length === 0 && <Text style={{ color: C.muted }}>{t('gear.empty')}</Text>}
       {gear.map((g) => (
         <Pressable key={g.id} onPress={() => menu(g)} accessibilityRole="button"
           style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 20,
@@ -52,8 +54,8 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
           <IconWell icon={g.kind === 'bike' ? 'bike' : 'shoe-sneaker'} size={38} />
           <View style={{ flex: 1, gap: 6 }}>
             <Text style={{ color: C.text, fontWeight: '600' }}>
-              {g.name}{g.isDefault ? <Text style={{ color: C.accent, fontSize: 12 }}>  default</Text> : null}
-              {g.retired ? <Text style={{ color: C.muted, fontSize: 12 }}>  retired</Text> : null}
+              {g.name}{g.isDefault ? <Text style={{ color: C.accent, fontSize: 12 }}>  {t('gear.default')}</Text> : null}
+              {g.retired ? <Text style={{ color: C.muted, fontSize: 12 }}>  {t('gear.retired')}</Text> : null}
             </Text>
             {g.limitKm && !g.retired ? (() => {
               const km = used(g.id) / 1000, frac = km / g.limitKm;
@@ -61,8 +63,8 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
                 <>
                   <NeuProgress value={frac} />
                   <Text style={{ color: frac >= 0.9 ? C.danger : C.muted, fontSize: 11 }}>
-                    {frac >= 1 ? 'Worn out — time for new shoes' : frac >= 0.9 ? 'Nearly worn out — plan a replacement'
-                      : `${Math.max(0, Math.round(g.limitKm - km))} km of ${g.limitKm} left`}
+                    {frac >= 1 ? t('gear.wornOut') : frac >= 0.9 ? t('gear.nearlyWorn')
+                      : t('gear.left').replace('{n}', String(Math.max(0, Math.round(g.limitKm - km)))).replace('{of}', String(g.limitKm))}
                   </Text>
                 </>
               );
@@ -73,11 +75,11 @@ export default function GearCard({ activities }: { activities: Activity[] }) {
       ))}
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <NeuIconButton icon={kind === 'bike' ? 'bike' : 'shoe-sneaker'} size={42} color={C.accent}
-          accessibilityLabel={`Gear type: ${kind}. Tap to switch`} onPress={() => setKind(kind === 'shoes' ? 'bike' : 'shoes')} />
+          accessibilityLabel={t('gear.typeA11y').replace('{kind}', t(kind === 'bike' ? 'det.bike' : 'det.shoes'))} onPress={() => setKind(kind === 'shoes' ? 'bike' : 'shoes')} />
         <TextInput value={draft} onChangeText={setDraft} onSubmitEditing={add}
-          placeholder={kind === 'bike' ? 'New bike name' : 'New shoes name'} placeholderTextColor={C.muted}
+          placeholder={t(kind === 'bike' ? 'gear.newBike' : 'gear.newShoes')} placeholderTextColor={C.muted}
           style={{ flex: 1, color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 }} />
-        <NeuButton small accent label="Add" onPress={add} />
+        <NeuButton small accent label={t('gear.add')} onPress={add} />
       </View>
     </NeuCard>
   );

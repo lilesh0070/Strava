@@ -1,17 +1,27 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
+import * as Sharing from 'expo-sharing';
+import { useMemo, useRef, useState } from 'react';
+import { Alert, Platform, Pressable, RefreshControl, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
 import ActivityCard from '../../components/ActivityCard';
 import FeedSkeleton from '../../components/Skeleton';
-import { IconWell, NeuButton, NeuCard } from '../../components/Neu';
+import { IconWell, NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
+import type { ShareCardHandle } from '../../components/ShareCard';
+import WeekRecapCard, { recapDateText } from '../../components/WeekRecapCard';
+import { friends } from '../../lib/friendsApp';
 import { fmtDuration } from '../../lib/geo';
+import { getProfile } from '../../lib/storage';
 import { activitySteps, fmtSteps } from '../../lib/steps';
 import { compareWeeks } from '../../lib/records';
+import { weekText } from '../../lib/shareText';
+import { showToast } from '../../lib/toast';
+import { defaultRecapWeek, isCurrentWeek, weekRecap, type WeekRecap } from '../../lib/weekRecap';
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Activity, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
-import { useT } from '../../lib/i18n';
+import { sportName, useT } from '../../lib/i18n';
 
 const renderItem = ({ item }: { item: Activity }) => <ActivityCard a={item} />;
 
@@ -50,6 +60,54 @@ export default function Feed() {
   }, [items, query, sport]);
 
   const sections = useMemo(() => byMonth(filtered), [filtered]);
+
+  // "Share my week": a card (image) or a text block for the group chat; last week early in the week
+  const [recapWeek, setRecapWeek] = useState<number | null>(null);
+  const [name, setName] = useState('Athlete');
+  const [rank, setRank] = useState<number | null>(null);
+  const recap = useMemo(() => weekRecap(items ?? [], recapWeek ?? defaultRecapWeek(items ?? [])), [items, recapWeek]);
+  const recapRef = useRef<ShareCardHandle>(null);
+  const weekLabels = { activities: t('wk.activities'), best: t('wk.best').toLowerCase(), steps: t('wk.steps').toLowerCase(),
+    streak: t('wk.streak').toLowerCase(), vsLast: t('wk.vsLast'), rank: t('wk.rank') };
+  const sharing = useRef(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const openShare = async (r: WeekRecap) => {
+    if (sharing.current) return; // a second tap while the friends rank loads must not stack dialogs
+    sharing.current = true;
+    setShareBusy(true);
+    try { await showShare(r); } finally { sharing.current = false; setShareBusy(false); }
+  };
+  const showShare = async (r: WeekRecap) => {
+    setRecapWeek(r.start);
+    const isThis = isCurrentWeek(r.start);
+    const [p, rk] = await Promise.all([
+      getProfile().catch(() => null),
+      // friends rank only exists for the current week; a slow network must not hold the dialog back
+      isThis && friends ? Promise.race([
+        friends.isEnabled().then((on) => (on ? friends!.board('week') : [])).then((b) => b.find((x) => x.me)?.rank ?? null).catch(() => null),
+        new Promise<null>((res) => setTimeout(() => res(null), 2500)),
+      ]) : Promise.resolve(null),
+    ]);
+    if (p?.name) setName(p.name);
+    setRank(rk);
+    const dateText = recapDateText(r);
+    const text = weekText(r, { title: t('wk.title'), dateText, labels: weekLabels, rank: rk });
+    const buttons = [
+      // step into the neighbouring week by days, not exactly 7 × 24 h (DST weeks are 167 / 169 hours)
+      { text: isThis ? t('wk.last') : t('wk.this'), onPress: () => openShare(weekRecap(items ?? [], isThis ? r.start - 3 * 86_400_000 : r.end)) },
+      { text: t('wk.text'), onPress: async () => { await Clipboard.setStringAsync(text); showToast(t('wk.copied')); } },
+      { text: t('wk.image'), onPress: async () => {
+        try {
+          await new Promise((res) => setTimeout(res, 80)); // let the off-screen card render this week
+          const uri = await captureRef(recapRef as unknown as Parameters<typeof captureRef>[0], { format: 'png', quality: 1, result: 'tmpfile' });
+          await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('wk.share') });
+        } catch { showToast(t('sh.failed')); }
+      } },
+    ];
+    Alert.alert(t('wk.share'), `${dateText}${r.count ? '' : `\n${t('wk.empty')}`}`,
+      Platform.OS === 'ios' ? [{ text: t('rec.cancel'), style: 'cancel' }, ...buttons] : buttons, { cancelable: true });
+  };
+
   if (!items) return <FeedSkeleton />;
 
   const cmp = compareWeeks(items);
@@ -62,10 +120,11 @@ export default function Feed() {
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={F.label}>{t('feed.thisWeek')} · {cmp.thisCount} {t('feed.activities')} · {fmtDuration(cmp.thisSec)}</Text>
           <Text style={{ color: C.text, fontSize: 26, fontWeight: '800' }}>{cmp.thisKm.toFixed(1)} km</Text>
-          <Text style={{ color: trend == null ? C.muted : trend >= 0 ? C.success : C.danger, fontSize: 12, fontWeight: '700' }}>
+          <Text style={{ color: trend == null ? C.muted : trend >= 0 ? C.successInk : C.dangerInk, fontSize: 12, fontWeight: '700' }}>
             {trend == null ? t('feed.nothingLast') : `${trend >= 0 ? '▲' : '▼'} ${Math.abs(trend)}% ${t('feed.vsLast')} (${cmp.lastKm.toFixed(1)} km)`}
           </Text>
         </View>
+        <NeuIconButton icon="share-variant" size={40} accessibilityLabel={t('wk.share')} busy={shareBusy} onPress={() => openShare(recap)} />
       </NeuCard>
 
       <View style={{ marginHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16,
@@ -73,20 +132,25 @@ export default function Feed() {
         <MaterialCommunityIcons name="magnify" size={20} color={C.muted} />
         <TextInput value={query} onChangeText={setQuery} placeholder={t('feed.search')} placeholderTextColor={C.muted}
           style={{ flex: 1, color: C.text, paddingVertical: 12, fontSize: 15 }} returnKeyType="search" />
-        {query ? <MaterialCommunityIcons name="close-circle" size={18} color={C.muted} onPress={() => setQuery('')} /> : null}
+        {query ? (
+          <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={t('feed.clear')} onPress={() => setQuery('')}>
+            <MaterialCommunityIcons name="close-circle" size={18} color={C.muted} />
+          </Pressable>
+        ) : null}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 8, gap: 12 }}>
         <NeuButton small label={t('feed.all')} selected={sport === 'all'} onPress={() => setSport('all')} />
         {SPORTS.map((s) => (
-          <NeuButton key={s.key} small icon={s.icon as never} label={s.label} selected={sport === s.key} onPress={() => setSport(s.key)} />
+          <NeuButton key={s.key} small icon={s.icon as never} label={sportName(t, s.key)} selected={sport === s.key} onPress={() => setSport(s.key)} />
         ))}
       </ScrollView>
     </View>
   ) : undefined;
 
   return (
+    <>
     <SectionList
       sections={sections}
       keyExtractor={(a) => a.id}
@@ -108,7 +172,12 @@ export default function Feed() {
       keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl refreshing={refreshing} tintColor={C.accent} colors={[C.accent]}
-          onRefresh={async () => { setRefreshing(true); reload(); setRefreshing(false); }} />
+          onRefresh={async () => {
+            setRefreshing(true);
+            // long enough to be seen, so the pull visibly does something
+            await Promise.all([reload(), new Promise((r) => setTimeout(r, 450))]);
+            setRefreshing(false);
+          }} />
       }
       ListHeaderComponent={header}
       ListEmptyComponent={
@@ -124,5 +193,9 @@ export default function Feed() {
         )
       }
     />
+    <View style={{ position: 'absolute', left: -10000, top: 0 }} pointerEvents="none">
+      <WeekRecapCard ref={recapRef} recap={recap} name={name} rank={rank} />
+    </View>
+    </>
   );
 }

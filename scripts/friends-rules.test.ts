@@ -15,7 +15,7 @@ const mem = () => { let v: string | null = null; return { get: async () => v, se
 const monday = new Date(2026, 10, 2).getTime();
 function device(name: string, weekKm: number) {
   const client = createFirebase(cfg, mem());
-  const stats = { name, weekKm, weekStart: monday };
+  const stats = { name, weekKm, weekStart: monday, monthKm: weekKm * 2, monthStart: new Date(2026, 10, 1).getTime(), totalKm: weekKm * 10 };
   return { client, stats, f: createFriends({ client, kv: mem(), stats: async () => stats }) };
 }
 const denied = async (p: Promise<unknown>) => {
@@ -119,4 +119,16 @@ test('turning friends off removes the profile, friendships and requests', async 
   await C.f.disable();
   assert.equal(await C.f.isEnabled(), false);
   assert.ok(!(await A.f.board()).some((r) => r.name === 'Chen'));
+});
+
+test('month and all-time leaderboards use the shared totals', async () => {
+  const E = device('Esha', 5), F = device('Farhan', 9);
+  const ce = await E.f.enable(); await F.f.enable();
+  await F.f.sendRequest(ce);
+  await E.f.accept((await E.f.incoming())[0]);
+  assert.deepEqual((await E.f.board('month')).map((r) => [r.name, r.weekKm]), [['Farhan', 18], ['Esha', 10]]);
+  assert.deepEqual((await E.f.board('all')).map((r) => [r.name, r.weekKm]), [['Farhan', 90], ['Esha', 50]]);
+  // a stranger still can't write the new fields, and a profile with an unknown field is rejected
+  await denied(E.client.set(`profiles/${await F.client.uid()}`, { code: 'x', name: 'x', weekKm: 1, weekStart: 1, monthKm: 1, monthStart: 1, totalKm: 1, updatedAt: 1 }));
+  await denied(E.client.set(`profiles/${await E.client.uid()}`, { code: ce, name: 'Esha', weekKm: 1, weekStart: 1, updatedAt: 1, lat: 28.6 }));
 });

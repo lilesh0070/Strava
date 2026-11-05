@@ -5,6 +5,7 @@
   },
   "exclude": [
     "**/*.test.ts",
+    "scripts/sim",
     "node_modules"
   ]
 }

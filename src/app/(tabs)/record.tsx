@@ -1,10 +1,11 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Alert, AppState, Linking, Pressable, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Alert, Animated, AppState, LayoutAnimation, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NeuButton, NeuCard, NeuIconButton } from '../../components/Neu';
+import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
@@ -13,13 +14,17 @@ import { fmtSteps, isOnFoot } from '../../lib/steps';
 import { gpsHealth } from '../../lib/live';
 import { newlyEarned } from '../../lib/achievements';
 import { newRecords } from '../../lib/records';
-import { getSettings, listActivities } from '../../lib/storage';
+import { getProfile, getSettings, listActivities, updateSettings } from '../../lib/storage';
+import { useActivities } from '../../lib/useActivities';
+import { mondayOf } from '../../lib/coach';
+import { showToast } from '../../lib/toast';
+import { celebrate } from '../../lib/celebrate';
 import { useSelectedWorkout } from '../../lib/workoutSelection';
-import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
+import { findWorkout, remaining, stepKey } from '../../lib/workouts';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
 import { SPORTS, sessionMovingSec, sportInfo, workoutSec, type Sport } from '../../lib/types';
-import { useT } from '../../lib/i18n';
+import { badgeTitle, prLabel, sportName, useT } from '../../lib/i18n';
 
 // Snapshot changes identity on every tracker notification so React re-renders.
 let version = 0;
@@ -32,15 +37,67 @@ const useTracker = () => {
 function KeepAwake() { useKeepAwake(); return null; }
 /** Stable empty route, so the map doesn't redraw every second before Start. */
 const NO_SEGMENTS: never[] = [];
+const MAP_STYLE = { flex: 1, borderRadius: 26 } as const;
+/** Animate the next layout change (picker ↔ countdown ↔ live stats) instead of snapping. */
+const ease = () => LayoutAnimation.configureNext(LayoutAnimation.create(260, 'easeInEaseOut', 'opacity'));
+
+/** The 3-2-1 digit: each new number springs in. */
+function CountdownDigit({ n, color }: { n: number; color: string }) {
+  const [scale] = useState(() => new Animated.Value(1.5));
+  const [opacity] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    scale.setValue(1.5); opacity.setValue(0);
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5, tension: 120 }),
+      Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }),
+    ]).start();
+  }, [n, scale, opacity]);
+  return (
+    <Animated.Text style={{ fontSize: 60, fontWeight: '900', color, transform: [{ scale }], opacity }} maxFontSizeMultiplier={1.2}>{n}</Animated.Text>
+  );
+}
+
+/** Soft pulsing ring behind Start while GPS is ready. */
+function ReadyGlow({ on, color, size }: { on: boolean; color: string; size: number }) {
+  const [o] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    if (!on) { Animated.timing(o, { toValue: 0, duration: 300, useNativeDriver: true }).start(); return; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(o, { toValue: 0.35, duration: 900, useNativeDriver: true }),
+      Animated.timing(o, { toValue: 0.12, duration: 900, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [on, o]);
+  return <Animated.View pointerEvents="none" style={{ position: 'absolute', width: size + 22, height: size + 22, borderRadius: (size + 22) / 2, backgroundColor: color, opacity: o }} />;
+}
 
 export default function Record() {
   const { C, S, F } = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
   const { session, fix } = useTracker();
-  const [sport, setSport] = useState<Sport>('run');
+  const [sport, setSportState] = useState<Sport>('run');
+  // the sport picked last time is remembered, so Start is one tap after opening the tab
+  useEffect(() => { getSettings().then((s) => { if (s.lastSport) setSportState(s.lastSport); }).catch(() => undefined); }, []);
+  const setSport = (s: Sport) => { setSportState(s); updateSettings({ lastSport: s }).catch(() => undefined); };
   const [now, setNow] = useState(Date.now);
-  const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
+  /** What the screen is busy with: the buttons show it instead of looking frozen. */
+  const [phase, setPhase] = useState<'idle' | 'preparing' | 'saving'>('idle');
+  // targets for this activity and the weekly goal, for the progress bars under the live stats
+  const [targets, setTargets] = useState<{ distM: number | null; timeSec: number | null }>({ distM: null, timeSec: null });
+  const [weeklyGoalKm, setWeeklyGoalKm] = useState(0);
+  const { items, loadedAt } = useActivities();
+  useEffect(() => {
+    getSettings().then((s) => setTargets({ distM: s.targetDistanceM, timeSec: s.targetTimeSec })).catch(() => undefined);
+    getProfile().then((p) => setWeeklyGoalKm(p.weeklyGoalKm)).catch(() => undefined);
+  }, [session?.startedAt]);
+  const weekKmBefore = useMemo(() => {
+    const ws = mondayOf(loadedAt);
+    return (items ?? []).filter((a) => a.startedAt >= ws).reduce((s, a) => s + a.distanceM, 0) / 1000;
+  }, [items, loadedAt]);
+  const [perm, setPerm] = useState<tracker.PermissionResult | 'unasked' | null>(null);
+  const [mapOffline, setMapOffline] = useState(false);
   const [precision, setPrecision] = useState<tracker.Precision>('precise');
   const [focused, setFocused] = useState(true);
   useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
@@ -71,18 +128,32 @@ export default function Record() {
   useFocusEffect(useCallback(() => {
     let cancelled = false;
     const checkPrecision = () => tracker.locationPrecision().then((p) => { if (!cancelled) setPrecision(p); });
-    // only asks for foreground location here; "Allow all the time" is asked once, on Start
-    tracker.ensurePermissions(false).then((p) => {
+    // No OS dialog just for opening the tab: when permission was never asked, a card in the map explains and
+    // offers it; "Allow all the time" is asked once, on Start.
+    const check = () => tracker.permissionStatus().then(async (st) => {
+      if (cancelled) return;
+      if (st !== 'granted') { setPerm(st === 'denied' ? 'denied' : 'unasked'); return; }
+      // already granted: read foreground vs background without any request, so an Android user who kept
+      // "Approximate" is not shown the upgrade dialog again every time the app comes back to the front
+      const p = await tracker.grantedLevel();
+      if (cancelled) return;
       setPerm(p);
-      if (p === 'denied' || cancelled) return;
       checkPrecision();
       tracker.setWarmUp(true);
     });
+    check();
     const id = setInterval(() => { if (!tracker.getSession()) setNow(Date.now()); }, 1000);
-    // back from system settings: the user may have just turned on precise location
-    const app = AppState.addEventListener('change', (st) => { if (st === 'active') checkPrecision(); });
+    // back from system settings: the user may have just allowed location or turned on precise location
+    const app = AppState.addEventListener('change', (st) => { if (st === 'active') check(); });
     return () => { cancelled = true; tracker.setWarmUp(false); clearInterval(id); app.remove(); };
   }, []));
+  const allowLocation = async () => {
+    const p = await tracker.ensurePermissions(false);
+    setPerm(p);
+    if (p === 'denied') return;
+    tracker.locationPrecision().then(setPrecision).catch(() => undefined);
+    tracker.setWarmUp(true);
+  };
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
@@ -92,7 +163,7 @@ export default function Record() {
   // age from when the fix arrived, not its GPS timestamp, so a skewed GPS clock can't fake a signal
   const health = gpsHealth(fix ? { ...fix, t: tracker.getLastFixAt() } : null, now);
   const gpsOk = health === 'good' && precision === 'precise';
-  const cur = tracker.currentSpeed();
+  const cur = tracker.steadySpeed(); // held steady: no flicker at a constant pace
   const laps = active?.laps ?? [];
   // the open lap always starts at the last press, so the display changes the moment Lap is tapped
   const lastMark = laps[laps.length - 1] ?? { distanceM: 0, movingSec: 0 };
@@ -100,7 +171,8 @@ export default function Record() {
 
   const begin = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    try { await tracker.start(sport, selectedWorkout); } finally { starting.current = false; }
+    ease();
+    try { await tracker.start(sport, selectedWorkout); } finally { starting.current = false; setPhase('idle'); }
   };
 
   /** Ask for precise location / location on. Resolves true when recording may go ahead. */
@@ -122,13 +194,16 @@ export default function Record() {
   const onStart = async () => {
     if (starting.current) return; // ignore double taps (and a second countdown)
     starting.current = true;
+    setPhase('preparing');
     let countdownOn: boolean;
     try {
-      if (!(await prepareStart())) { starting.current = false; return; }
+      if (!(await prepareStart())) { starting.current = false; setPhase('idle'); return; }
       countdownOn = (await getSettings()).countdown;
-    } catch { starting.current = false; return; }
+    } catch { starting.current = false; setPhase('idle'); return; }
     if (!countdownOn) return begin();
+    setPhase('idle');
     let n = 3;
+    ease();
     setCountdown(n);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
     cdTimer.current = setInterval(() => {
@@ -136,6 +211,7 @@ export default function Record() {
       if (n <= 0) {
         if (cdTimer.current) clearInterval(cdTimer.current);
         cdTimer.current = null;
+        ease();
         setCountdown(null);
         begin();
       } else {
@@ -150,15 +226,26 @@ export default function Record() {
     // permission may have changed in system Settings since this tab was focused; Start is also where
     // "Allow all the time" is requested (once)
     let p = perm;
-    if (p !== 'background') { p = await tracker.ensurePermissions(true); setPerm(p); }
+    let pr = precision;
+    if (p !== 'background') {
+      const before = p;
+      p = await tracker.ensurePermissions(true);
+      setPerm(p);
+      // first grant happens right here: precision was never read (and the user may have picked Approximate)
+      if (p !== 'denied' && before !== 'foreground') {
+        pr = await tracker.locationPrecision();
+        setPrecision(pr);
+        tracker.setWarmUp(true);
+      }
+    }
     if (p === 'denied') {
-      Alert.alert('Location needed', 'Allow location access in Settings to record activities.', [
-        { text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      Alert.alert(t('rec.locNeededTitle'), t('rec.locNeededBody'), [
+        { text: t('rec.cancel'), style: 'cancel' }, { text: t('rec.openSettings'), onPress: () => Linking.openSettings() },
       ]);
       return false;
     }
-    if (precision !== 'precise' && !(await fixPrecision())) return false;
-    if (health !== 'good' && precision === 'precise') {
+    if (pr !== 'precise' && !(await fixPrecision())) return false;
+    if (health !== 'good' && pr === 'precise') {
       const go = await new Promise<boolean>((resolve) => Alert.alert(
         health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
         t('rec.weakBody'),
@@ -175,35 +262,47 @@ export default function Record() {
   const cancelCountdown = () => {
     if (cdTimer.current) clearInterval(cdTimer.current);
     cdTimer.current = null;
+    ease();
     setCountdown(null);
     starting.current = false;
   };
 
+  /** Throw the recording away, with a few seconds to change your mind. */
+  const discard = async () => {
+    ease();
+    await tracker.discard();
+    showToast(t('rec.discarded'), { label: t('toast.undo'), run: () => { ease(); tracker.undoDiscard().catch(() => undefined); } }, tracker.UNDO_DISCARD_MS);
+  };
+
+  const save = async () => {
+    if (phase !== 'idle') return;
+    setPhase('saving');
+    const before = await listActivities().catch(() => []);
+    let a;
+    try { a = await tracker.finish(); }
+    catch (e) {
+      setPhase('idle');
+      // the recording is kept (paused), so the user can try again
+      Alert.alert(t('rec.saveFailed'), `${t('rec.saveFailedBody')}\n\n${String((e as Error)?.message ?? e)}`);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    ease();
+    setPhase('idle');
+    if (!a) return;
+    router.push(`/activity/${a.id}`);
+    celebrate([
+      ...newRecords(before, a).map((r) => ({ kind: 'pr' as const, title: prLabel(t, r),
+        value: r.kind === 'effort' ? fmtDuration(r.value) : r.kind === 'longest' ? `${fmtKm(r.value)} km` : `${Math.round(r.value)} m` })),
+      ...newlyEarned(before, a).map((b) => ({ kind: 'badge' as const, title: badgeTitle(t, b.id), icon: b.icon })),
+    ]);
+  };
+
   const onFinish = () => {
     Alert.alert(t('rec.finishQ'), undefined, [
-      { text: t('rec.resume'), style: 'cancel', onPress: () => { tracker.resume(); } },
-      { text: t('rec.discard'), style: 'destructive', onPress: () => tracker.discard() },
-      {
-        text: t('rec.save'),
-        onPress: async () => {
-          const before = await listActivities().catch(() => []);
-          let a;
-          try { a = await tracker.finish(); }
-          catch (e) {
-            // the recording is kept (paused), so the user can try again
-            Alert.alert(t('rec.saveFailed'), `${t('rec.saveFailedBody')}\n\n${String((e as Error)?.message ?? e)}`);
-            return;
-          }
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-          if (!a) return;
-          router.push(`/activity/${a.id}`);
-          const lines = [
-            ...newRecords(before, a).map((r) => `🏆 New PR: ${r.label}${r.kind === 'effort' ? ` — ${fmtDuration(r.value)}` : ''}`),
-            ...newlyEarned(before, a).map((b) => `🏅 Badge: ${b.title}`),
-          ];
-          if (lines.length) Alert.alert(t('rec.nice'), lines.join('\n'));
-        },
-      },
+      { text: t('rec.resume'), style: 'cancel', onPress: () => { ease(); tracker.resume(); } },
+      { text: t('rec.discard'), style: 'destructive', onPress: discard },
+      { text: t('rec.save'), onPress: save },
     ]);
   };
 
@@ -217,14 +316,27 @@ export default function Record() {
       {active?.status === 'recording' && <KeepAwake />}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={{ flex: 1, borderRadius: 26 }} />
+        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE}
+          onTiles={(s) => setMapOffline(s === 'offline')} />
+        {perm === 'unasked' && !active && (
+          <View style={{ position: 'absolute', left: 24, right: 24, top: '30%', alignItems: 'center' }}>
+            <NeuCard radius={26} style={{ alignItems: 'center', gap: 12, width: '100%' }}>
+              <IconWell icon="map-marker-radius-outline" />
+              <Text style={{ color: C.text, textAlign: 'center', fontWeight: '600' }}>{t('rec.locWhy')}</Text>
+              <NeuButton accent small icon="crosshairs-gps" label={t('rec.allowLoc')} onPress={allowLocation} />
+            </NeuCard>
+          </View>
+        )}
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Pressable disabled={precision === 'precise'} onPress={fixPrecision} accessibilityRole="button">
+          <Pressable disabled={precision === 'precise' && perm !== 'denied'} accessibilityRole="button"
+            onPress={() => { if (perm === 'denied') Linking.openSettings().catch(() => undefined); else fixPrecision(); }}>
             {pill(<>
               <View style={{ width: 9, height: 9, borderRadius: 5,
-                backgroundColor: precision === 'off' ? C.danger : gpsOk ? C.success : precision === 'approximate' || health === 'weak' ? '#F5A524' : C.danger }} />
+                backgroundColor: precision === 'off' || perm === 'denied' ? C.danger : gpsOk ? C.success : precision === 'approximate' || health === 'weak' ? C.warnInk : C.danger }} />
               <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
-                {precision === 'off' ? t('rec.locOff')
+                {perm === 'denied' ? t('rec.locDenied')
+                  : perm === 'unasked' ? t('rec.allowLoc')
+                  : precision === 'off' ? t('rec.locOff')
                   : precision === 'approximate' ? t('rec.approx')
                   : gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m`
                   : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m`
@@ -234,9 +346,13 @@ export default function Record() {
           </Pressable>
           <SettingsButton />
         </View>
-        {perm === 'foreground' && (
-          <View style={{ position: 'absolute', bottom: 16, alignSelf: 'center' }}>
-            {pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
+        {(perm === 'foreground' || mapOffline) && (
+          <View style={{ position: 'absolute', bottom: 16, left: 16, right: 16, alignItems: 'center', gap: 6 }}>
+            {mapOffline && pill(<>
+              <MaterialCommunityIcons name="wifi-off" size={13} color={C.muted} />
+              <Text style={{ color: C.muted, fontSize: 11, flexShrink: 1 }} numberOfLines={2}>{t('map.offline')}</Text>
+            </>)}
+            {perm === 'foreground' && pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
           </View>
         )}
       </View>
@@ -246,7 +362,7 @@ export default function Record() {
           <View style={{ alignItems: 'center', gap: 16, paddingVertical: 6 }}>
             <View style={{ width: 120, height: 120, borderRadius: 60, alignItems: 'center', justifyContent: 'center',
               backgroundColor: C.bg, boxShadow: S.inset }}>
-              <Text style={{ fontSize: 60, fontWeight: '900', color: C.accent }}>{countdown}</Text>
+              <CountdownDigit n={countdown} color={C.accentInk} />
             </View>
             <NeuButton small label={t('rec.cancel')} onPress={cancelCountdown} />
           </View>
@@ -268,6 +384,35 @@ export default function Record() {
               <Stat label={`${t('rec.lap')} ${laps.length + 1}`} value={fmtDuration(openLap.durationSec)} />
               <Stat label={t('rec.lapDist')} value={fmtKm(openLap.distanceM)} unit="km" />
             </View>
+            {(targets.distM || targets.timeSec || weeklyGoalKm > 0) && (
+              <View style={{ gap: 8 }}>
+                {targets.distM ? (
+                  <View style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={F.label}>{t('rec.targetBar')} · {fmtKm(targets.distM)} km</Text>
+                      <Text style={[F.label, { color: dist >= targets.distM ? C.successInk : C.muted }]}>{Math.min(100, Math.round((dist / targets.distM) * 100))}%</Text>
+                    </View>
+                    <NeuProgress value={dist / targets.distM} />
+                  </View>
+                ) : targets.timeSec ? (
+                  <View style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={F.label}>{t('rec.targetBar')} · {fmtDuration(targets.timeSec)}</Text>
+                      <Text style={[F.label, { color: moving >= targets.timeSec ? C.successInk : C.muted }]}>{Math.min(100, Math.round((moving / targets.timeSec) * 100))}%</Text>
+                    </View>
+                    <NeuProgress value={moving / targets.timeSec} />
+                  </View>
+                ) : null}
+                {weeklyGoalKm > 0 && (
+                  <View style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={F.label}>{t('rec.weekBar')} · {(weekKmBefore + dist / 1000).toFixed(1)} / {weeklyGoalKm} km</Text>
+                    </View>
+                    <NeuProgress value={(weekKmBefore + dist / 1000) / weeklyGoalKm} />
+                  </View>
+                )}
+              </View>
+            )}
             {isOnFoot(active.sport) && active.steps != null && (
               <View style={{ flexDirection: 'row' }}>
                 <Stat label={t('rec.steps')} value={fmtSteps(active.steps)} />
@@ -278,39 +423,52 @@ export default function Record() {
             {(() => {
               const w = findWorkout(active.workout?.workoutId);
               if (!w || !active.workout) return null;
-              if (active.workout.done) return <Text style={{ color: C.success, textAlign: 'center', fontWeight: '800' }}>Workout complete ✓</Text>;
+              if (active.workout.done) return <Text style={{ color: C.successInk, textAlign: 'center', fontWeight: '800' }}>{t('rec.workoutDone')}</Text>;
               const step = w.steps[active.workout.index];
               const left = remaining(w, active.workout, active.distanceM ?? 0, workoutSec(active, now));
               return (
                 <NeuCard inset radius={20} padding={12} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ color: step.kind === 'work' ? C.accent : C.muted, fontWeight: '800' }}>
-                    {stepLabel(step)} · {active.workout.index + 1}/{w.steps.length}
+                  <Text style={{ color: step.kind === 'work' ? C.accentInk : C.muted, fontWeight: '800' }}>
+                    {t(stepKey(step))} · {active.workout.index + 1}/{w.steps.length}
                   </Text>
                   <Text style={{ color: C.text, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
-                    {step.by === 'distance' ? `${Math.round(left)} m left` : `${fmtDuration(left)} left`}
+                    {step.by === 'distance' ? `${Math.round(left)} m ${t('rec.left')}` : `${fmtDuration(left)} ${t('rec.left')}`}
                   </Text>
                 </NeuCard>
               );
             })()}
             {active.status === 'paused' && (
-              <Text style={{ color: C.accent, textAlign: 'center', fontWeight: '800' }}>
+              <Text style={{ color: C.accentInk, textAlign: 'center', fontWeight: '800' }}>
                 {active.autoPaused ? t('rec.autoPaused') : t('rec.paused')}
               </Text>
             )}
-            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 28 }}>
-              {active.status === 'recording' ? (
-                <>
-                  <NeuIconButton icon="flag-outline" size={60} color={C.accent} accessibilityLabel="New lap" onPress={() => tracker.lap()} />
-                  <NeuIconButton icon="pause" size={80} accent accessibilityLabel="Pause" onPress={() => tracker.pause()} />
-                  <View style={{ width: 60 }} />
-                </>
-              ) : (
-                <>
-                  <NeuIconButton icon="play" size={80} accent accessibilityLabel="Resume" onPress={() => tracker.resume()} />
-                  <NeuIconButton icon="flag-checkered" size={64} color={C.accent} accessibilityLabel="Finish" onPress={onFinish} />
-                </>
-              )}
-            </View>
+            {phase === 'saving' ? (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12, paddingVertical: 14 }}>
+                <NeuIconButton icon="content-save" size={64} accent busy accessibilityLabel={t('rec.saving')} />
+                <Text style={{ color: C.muted, fontWeight: '700' }}>{t('rec.saving')}</Text>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 28 }}>
+                {active.status === 'recording' ? (
+                  <>
+                    <NeuIconButton icon="flag-outline" size={60} color={C.accentInk} accessibilityLabel={t('rec.newLap')}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined); tracker.lap(); }} />
+                    <NeuIconButton icon="pause" size={80} accent accessibilityLabel={t('rec.pause')}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined); ease(); tracker.pause(); }} />
+                    {/* Finish is always visible; a hold protects it from a mid-stride tap */}
+                    <NeuIconButton icon="flag-checkered" size={60} color={C.accentInk} accessibilityLabel={t('rec.finish')} accessibilityHint={t('rec.holdToFinish')}
+                      delayLongPress={600} onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => undefined); onFinish(); }}
+                      onPress={() => showToast(t('rec.holdToFinish'), undefined, 2500)} />
+                  </>
+                ) : (
+                  <>
+                    <NeuIconButton icon="play" size={80} accent accessibilityLabel={t('rec.resume')}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined); ease(); tracker.resume(); }} />
+                    <NeuIconButton icon="flag-checkered" size={64} color={C.accentInk} accessibilityLabel={t('rec.finish')} onPress={onFinish} />
+                  </>
+                )}
+              </View>
+            )}
           </>
         ) : (
           <>
@@ -320,17 +478,19 @@ export default function Record() {
                 const sel = s.key === sport;
                 return (
                   <View key={s.key} style={{ alignItems: 'center', gap: 8 }}>
-                    <NeuIconButton icon={s.icon as never} size={58} color={sel ? C.accent : C.muted}
-                      accessibilityLabel={s.label} onPress={() => setSport(s.key)} />
-                    <Text style={{ color: sel ? C.accent : C.muted, fontWeight: sel ? '800' : '600', fontSize: 13 }}>{s.label}</Text>
+                    <NeuIconButton icon={s.icon as never} size={58} color={sel ? C.accentInk : C.muted} selected={sel}
+                      accessibilityLabel={sportName(t, s.key)} disabled={phase === 'preparing'} onPress={() => setSport(s.key)} />
+                    <Text style={{ color: sel ? C.accentInk : C.muted, fontWeight: sel ? '800' : '600', fontSize: 13 }} maxFontSizeMultiplier={1.3}>{sportName(t, s.key)}</Text>
                   </View>
                 );
               })}
             </View>
-            <NeuButton small icon="timer-outline" label={findWorkout(selectedWorkout)?.name ?? t('rec.free')}
+            <NeuButton small icon="timer-outline" label={t(findWorkout(selectedWorkout)?.nameKey ?? 'rec.free')}
               selected={!!selectedWorkout} onPress={() => router.push('/workouts')} style={{ alignSelf: 'center' }} />
-            <View style={{ alignItems: 'center' }}>
-              <NeuIconButton icon="play" size={84} accent accessibilityLabel={`Start ${info.label}`} onPress={onStart} />
+            <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+              <ReadyGlow on={gpsOk && phase === 'idle'} color={C.accent} size={84} />
+              <NeuIconButton icon="play" size={84} accent busy={phase === 'preparing'} accessibilityLabel={`${t('rec.start')} ${sportName(t, info.key)}`} onPress={onStart} />
+              {phase === 'preparing' && <Text style={{ color: C.muted, fontSize: 12, marginTop: 10 }}>{t('rec.preparing')}</Text>}
             </View>
           </>
         )}

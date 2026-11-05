@@ -1,0 +1,10 @@
+export const __notes = [];
+export let __dismissed = 0;
+export const setNotificationChannelAsync = async () => ({});
+export const getPermissionsAsync = async () => ({ granted: true, canAskAgain: true });
+export const requestPermissionsAsync = async () => ({ granted: true });
+export const scheduleNotificationAsync = async (n) => { __notes.push(n); return n.identifier; };
+export const dismissNotificationAsync = async () => { __dismissed++; };
+export const AndroidImportance = { LOW: 2, DEFAULT: 3 };
+export const AndroidNotificationVisibility = { PUBLIC: 1 };
+export const AndroidNotificationPriority = { LOW: 'low' };

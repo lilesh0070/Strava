@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { NeuButton } from '../components/Neu';
 import RouteMap from '../components/RouteMap';
 import type { Point } from '../lib/geo';
+import { sportName, useT } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 import { SPORTS, type Sport } from '../lib/types';
 import { useActivities } from '../lib/useActivities';
@@ -17,6 +18,7 @@ function thin(seg: Point[], maxPoints = 300): Point[] {
 
 export default function Heatmap() {
   const { C, S } = useTheme();
+  const { t } = useT();
   const { items } = useActivities();
   const [sport, setSport] = useState<Sport | 'all'>('all');
   const segs = useMemo(
@@ -26,12 +28,12 @@ export default function Heatmap() {
   return (
     <View style={{ flex: 1, padding: 16, gap: 16 }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <NeuButton small label="All" selected={sport === 'all'} onPress={() => setSport('all')} />
-        {SPORTS.map((s) => <NeuButton key={s.key} small label={s.label} selected={sport === s.key} onPress={() => setSport(s.key)} />)}
+        <NeuButton small label={t('feed.all')} selected={sport === 'all'} onPress={() => setSport('all')} />
+        {SPORTS.map((s) => <NeuButton key={s.key} small label={sportName(t, s.key)} selected={sport === s.key} onPress={() => setSport(s.key)} />)}
       </View>
       <View style={{ flex: 1, borderRadius: 30, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
         {segs.length ? <RouteMap segments={segs} fitKey={sport} style={{ flex: 1, borderRadius: 24 }} />
-          : <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40 }}>No GPS routes yet.</Text>}
+          : <Text style={{ color: C.muted, textAlign: 'center', marginTop: 40 }}>{t('heat.empty')}</Text>}
       </View>
     </View>
   );

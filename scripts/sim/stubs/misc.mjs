@@ -1,0 +1,11 @@
+export const defineTask = () => {};
+export const notificationAsync = async () => {}; export const impactAsync = async () => {};
+export const NotificationFeedbackType = { Success: 's', Warning: 'w' }; export const ImpactFeedbackStyle = { Medium: 'm' };
+export const __said = []; export const speak = (t) => { __said.push(t); }; export const stop = () => {};
+export const getItemAsync = async () => null; export const setItemAsync = async () => {}; export const deleteItemAsync = async () => {};
+export const getDocumentAsync = async () => ({ canceled: true });
+export class File {} export class Directory {} export const Paths = {};
+export const shareAsync = async () => {}; export const isAvailableAsync = async () => true;
+export const AppState = { currentState: 'active', addEventListener: () => ({ remove() {} }) };
+export const Platform = { OS: 'android' };
+export const setAudioModeAsync = async () => {};

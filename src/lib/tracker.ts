@@ -13,10 +13,11 @@ import * as Haptics from 'expo-haptics';
 import { Pedometer } from 'expo-sensors';
 import { setAudioModeAsync } from 'expo-audio';
 import * as Speech from 'expo-speech';
-import { AUTO_RESUME_DIST_M, kmCue, shouldAutoPause } from './coach';
+import { AUTO_PAUSE_AFTER_MS, AUTO_RESUME_DIST_M, kmCue } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
-import { STOPPED_MS, kalmanStep, lapsFromMarks, paceAdvice, processNoise, rollingSpeed, type GpsFix, type KalmanState } from './live';
+import { clearLiveNotification, clearStaleLiveNotification, ensureLiveNotificationPermission, updateLiveNotification } from './liveNotification';
+import { MOVING_MS, STOPPED_MS, creditedSpeed as creditedSpeedOf, distanceStep, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, processNoise, settlePending, type CreditSample, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
 import { readBlob, removeBlob, writeBlob } from './blobStore';
@@ -123,7 +124,8 @@ function toFix(l: Location.LocationObject): GpsFix {
   const t = Math.abs(l.timestamp - Date.now()) > DAY_MS ? Date.now() : l.timestamp;
   return {
     lat: c.latitude, lng: c.longitude,
-    alt: c.altitude == null ? null : r(c.altitude, 1),
+    // altitude the chip itself flags as poor (vertical accuracy > 30 m) would only add phantom climbing
+    alt: c.altitude == null || (c.altitudeAccuracy != null && c.altitudeAccuracy > 30) ? null : r(c.altitude, 1),
     acc: c.accuracy == null ? null : r(c.accuracy, 1),
     t, spd: c.speed, hdg: c.heading,
   };
@@ -147,6 +149,9 @@ function staleness(f: GpsFix): number {
 const STALE_MS = 30_000; // cached fixes are minutes old; background batches are at most ~15 s old
 const accOk = (f: { acc: number | null }, max: number) => f.acc != null && f.acc <= max;
 
+/** Fixes worse than this are shown on the map chip but never reach the filter or the distance. */
+const MAX_ACC_M = 50;
+
 export function ingest(locations: Location.LocationObject[]) {
   return locked(async () => {
     await load();
@@ -163,20 +168,46 @@ export function ingest(locations: Location.LocationObject[]) {
       const s = session;
       const seg = s.segments[s.segments.length - 1];
       const last = seg[seg.length - 1] ?? s.segments.flat().at(-1);
+      const usable = accOk(f, MAX_ACC_M) && age <= STALE_MS;
 
       if (s.status === 'paused') {
-        // auto-resume once the athlete clearly moves away from where they stopped
-        if (s.autoPaused && last && age <= STALE_MS && accOk(p, 25) && haversine(last, p) >= AUTO_RESUME_DIST_M) {
-          const pausedFor = Math.max(0, p.t - (s.pauseStartedAt ?? p.t));
-          s.pausedMs += pausedFor;
-          s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
-          s.pauseStartedAt = null;
-          s.status = 'recording';
-          s.autoPaused = false;
-          s.segments.push([p]);
-          s.segStartedAt = p.t;
-          s.kf = null;
-          if (settings.voiceCues) say(phrase().resumed);
+        // Auto-paused: keep the filter warm and resume once the athlete clearly moves off — the filtered
+        // speed above walking pace on three fixes in a row, or the smoothed position well away from the
+        // stop point. (A raw fix was used before: one multipath spike resumed and re-paused the recording.)
+        if (s.autoPaused && last && usable) {
+          const kf = kalmanStep(s.kf, f, processNoise(s.sport));
+          s.kf = kf;
+          if (!kf.outlier) {
+            const sm = toPoint({ ...f, lat: kf.lat, lng: kf.lng });
+            lastFix = sm;
+            // without Doppler the filtered speed is position noise, so only a clear move away counts
+            const dop = hasDoppler(kf, f.t);
+            s.moveN = dop && Math.hypot(kf.ve, kf.vn) >= (isOnFoot(s.sport) && s.sport !== 'run' ? MOVING_MS : 1.0) ? (s.moveN ?? 0) + 1 : 0;
+            const hop = haversine(last, sm);
+            const hopNeeded = dop ? Math.max(AUTO_RESUME_DIST_M, 1.5 * (f.acc ?? 10)) : Math.max(20, 2.5 * (f.acc ?? 10));
+            s.hopN = accOk(f, 25) && hop >= hopNeeded ? (s.hopN ?? 0) + 1 : 0; // a 1-3 fix spike burst is not a move
+            if (s.moveN >= 3 || s.hopN >= 3 || (s.hopN >= 1 && accOk(f, 15))) {
+              const pausedFor = Math.max(0, sm.t - (s.pauseStartedAt ?? sm.t));
+              // Far from the stop point for the time "paused" (≥ 1 m/s on average, e.g. out of a tunnel or an
+              // underpass): the athlete never stopped, GPS just went blind. Undo the pause, keep the segment, so
+              // moving time, pace and best efforts count that stretch as moving.
+              const wasMoving = hop >= 25 && hop >= (pausedFor / 1000) * 1.0;
+              if (!wasMoving) {
+                s.pausedMs += pausedFor;
+                s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
+              }
+              s.pauseStartedAt = null;
+              s.status = 'recording';
+              s.autoPaused = false;
+              s.moveN = 0; s.hopN = 0;
+              s.distanceM = (s.distanceM ?? 0) + hop; // the first metres away from the stop point / the blind stretch
+              if (wasMoving && seg.length) seg.push({ ...sm, d: r(s.distanceM, 1) });
+              else { s.segments.push([{ ...sm, d: r(s.distanceM, 1) }]); s.segStartedAt = sm.t; }
+              s.ds = undefined; // distance stage restarts; the filter keeps its (settled) state
+              cred.length = 0;
+              if (settings.voiceCues) say(phrase().resumed);
+            }
+          }
         }
         stepWorkout(s, p.t); // a standing (auto-paused) rest still counts down
         continue;
@@ -184,61 +215,103 @@ export function ingest(locations: Location.LocationObject[]) {
 
       // a cached fix from before this segment must not become its first point
       if (!seg.length && age > STALE_MS) continue;
-
-      // smooth good-quality fixes before deciding whether to keep them
-      let q = p;
-      let ok = true;
-      if (accOk(f, 35)) {
+      if (usable) {
         const kf = kalmanStep(s.kf, f, processNoise(s.sport));
         s.kf = kf;
-        if (kf.outlier) ok = false; // multipath jump: ignore it
-        else {
-          q = toPoint({ ...f, lat: kf.lat, lng: kf.lng });
-          lastFix = q; // the live dot follows the smoothed track, the chip keeps the raw accuracy
-          // standing still (Doppler says so): don't let leftover jitter creep into the distance
-          if (seg.length && Math.hypot(kf.ve, kf.vn) < STOPPED_MS) ok = false;
-        }
-      }
-      if (ok && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12)) {
-        const prev = seg[seg.length - 1];
-        if (prev) s.distanceM = (s.distanceM ?? 0) + haversine(prev, q);
-        // filtered Doppler speed: no spikes from a single noisy fix
-        if (s.kf && s.kf.n > 5) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, s.kf.vs);
-        seg.push(q);
-        coachPace(s, seg, q.t);
-        const km = Math.floor((s.distanceM ?? 0) / 1000);
-        if (km > (s.lastCueKm ?? 0)) {
-          s.lastCueKm = km;
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-          if (settings.voiceCues) {
-            const args = [km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace] as const;
-            say(settings.language === 'hi' ? kmCueHi(...args) : kmCue(...args));
+        if (!kf.outlier) { // multipath jump: ignored
+          lastFix = toPoint({ ...f, lat: kf.lat, lng: kf.lng }); // the live dot follows the smoothed track, the chip keeps the raw accuracy
+          const res = distanceStep((s.ds ??= {}), kf, f, s.sport);
+          if (res.add > 0) s.distanceM = (s.distanceM ?? 0) + res.add;
+          cred.push({ t: f.t, d: s.distanceM ?? 0 });
+          while (cred.length > 2 && f.t - cred[1].t > CRED_KEEP_MS) cred.shift();
+          // filtered Doppler speed: no spikes from a single noisy fix
+          if (kf.n > 5) s.maxSpeedMs = Math.max(s.maxSpeedMs ?? 0, kf.vs);
+          // route points: the smoothed position, at least 3 m apart, never while standing still, and not
+          // before the filter has settled (the first fixes after a start can be tens of metres off)
+          const q = toPoint({ ...f, lat: res.lat, lng: res.lng });
+          const settled = kf.n >= 3 || accOk(f, 15);
+          if (!res.still && settled && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12, 3)) {
+            seg.push({ ...q, d: r(s.distanceM ?? 0, 1) });
+          } else maybeAutoPause(s, seg, p.t);
+          if (s.status === 'recording') {
+            coachPace(s, p.t);
+            checkTargets(s, p.t);
+            const km = Math.floor((s.distanceM ?? 0) / 1000);
+            if (km > (s.lastCueKm ?? 0)) {
+              s.lastCueKm = km;
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+              if (settings.voiceCues) {
+                const args = [km, sessionMovingSec(s, p.t), sportInfo(s.sport).usesPace] as const;
+                say(settings.language === 'hi' ? kmCueHi(...args) : kmCue(...args));
+              }
+            }
           }
-        }
-      } else {
-        // Idle since the last kept point, or since this segment began. Never measured from a point
-        // before the last resume, or a manual pause would be subtracted a second time.
-        const kept = seg[seg.length - 1];
-        const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : p.t);
-        if (settings.autoPause && shouldAutoPause(idleSince, p.t) && (s.distanceM ?? 0) > 0) {
-          s.status = 'paused';
-          s.autoPaused = true;
-          s.pauseStartedAt = idleSince;
-          if (settings.voiceCues) say(phrase().paused);
-        }
-      }
+        } else maybeAutoPause(s, seg, p.t, BLIND_PAUSE_MS); // a rejected jump is not movement
+      } else maybeAutoPause(s, seg, p.t, BLIND_PAUSE_MS); // indoors (Wi-Fi / cell fixes only) the idle clock still runs
       stepWorkout(s, p.t); // time-based interval steps: checked on every fix, kept or not
     }
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
     notify();
+    await liveStats(session?.status !== statusBefore);
   });
 }
 
-function coachPace(s: Session, seg: Point[], now: number) {
+/** Android lock-screen stats (throttled inside; awaited under the lock so finish() can clear it last). */
+async function liveStats(force = false) {
+  if (!session) return;
+  if (!settings.liveNotification) { await clearLiveNotification(); return; }
+  await updateLiveNotification(session, sessionMovingSec(session, Date.now()), currentSpeed(), settings.language, force);
+}
+
+/**
+ * Auto-pause after AUTO_PAUSE_AFTER_MS without a kept point, measured from the last kept point or from when
+ * this segment began (never from before the last resume, or a manual pause would be subtracted twice).
+ * Called for every fix that keeps no point, including inaccurate ones (indoors) and rejected jumps. Not for
+ * hikes: a 0.5 m/s scramble over rocks looks like standing still to GPS and would pause every minute.
+ */
+/**
+ * Without usable fixes the app can't tell standing indoors from running through an underpass, so it waits
+ * longer before pausing; the pause is back-dated either way, and a resume far away undoes it (see ingest).
+ */
+const BLIND_PAUSE_MS = 30_000;
+function maybeAutoPause(s: Session, seg: Point[], now: number, after = AUTO_PAUSE_AFTER_MS) {
+  if (!settings.autoPause || s.sport === 'hike' || s.status !== 'recording' || !((s.distanceM ?? 0) > 0)) return;
+  const kept = seg[seg.length - 1];
+  const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : now);
+  if (now - idleSince < after) return;
+  settleDistance(s);
+  s.status = 'paused';
+  s.autoPaused = true;
+  s.pauseStartedAt = idleSince;
+  // the pause is back-dated: a lap pressed while already standing can't be later than moving time
+  const mov = sessionMovingSec(s, now);
+  if (s.laps?.some((l) => l.movingSec > mov)) s.laps = s.laps.map((l) => (l.movingSec > mov ? { ...l, movingSec: mov } : l));
+  if (settings.voiceCues) say(phrase().paused);
+}
+
+/** Credit the distance a chord path still holds back; called when a segment ends. */
+function settleDistance(s: Session) {
+  const rest = settlePending(s.ds);
+  if (rest > 0) {
+    s.distanceM = (s.distanceM ?? 0) + rest;
+    const seg = s.segments[s.segments.length - 1], last = seg[seg.length - 1];
+    if (last?.d != null) last.d = r(s.distanceM, 1); // splits/charts read d: keep them equal to the headline
+  }
+}
+
+// ---------- live speed from the recorded distance ----------
+// (time, distance) samples for every filtered fix of the current segment. The live pace on phones without
+// Doppler and the pace coach read Δdistance/Δtime from here, so they agree with the headline distance
+// instead of re-measuring the noisy stored points (which read 20-40 % too fast).
+const cred: CreditSample[] = [];
+const CRED_KEEP_MS = 120_000;
+const creditedSpeed = (windowSec: number) => creditedSpeedOf(cred, windowSec);
+
+function coachPace(s: Session, now: number) {
   const target = settings.targetPaceSec;
   if (!target || !settings.voiceCues || !sportInfo(s.sport).usesPace) return;
   if (now - (s.lastPaceAlertAt ?? s.startedAt) < 90_000) return; // at most every 90 s
-  const v = rollingSpeed(seg, 60);
+  const v = creditedSpeed(60);
   const advice = paceAdvice(v ? 1000 / v : null, target);
   if (!advice) return;
   s.lastPaceAlertAt = now;
@@ -260,36 +333,106 @@ function stepWorkout(s: Session, now: number) {
 /** Time-based interval steps also need checking when no new GPS fix arrives (e.g. standing rest). */
 export function workoutTick() {
   return locked(async () => {
-    if (session && stepWorkout(session, Date.now())) { await persist(); notify(); }
+    if (!session) return;
+    const now = Date.now();
+    const cuedBefore = JSON.stringify(session.cued ?? {});
+    if (session.status === 'recording') checkTargets(session, now); // the time target needs no GPS fix
+    const changed = stepWorkout(session, now) || JSON.stringify(session.cued ?? {}) !== cuedBefore;
+    if (changed) { await persist(); notify(); }
+    await liveStats(); // keeps the time ticking in the notification even when no fix is kept
   });
 }
 
-/** Live speed (m/s): the filtered GPS Doppler speed, or the last 30 s of track when that is unavailable. */
+/** Live speed (m/s): the filtered GPS Doppler speed, or the recorded distance over the last 30 s without Doppler. */
 export function currentSpeed(): number | null {
   if (!session || session.status !== 'recording') return null;
+  const now = Date.now();
+  if (now - lastFixAt >= 5_000 || session.ds?.still) return null;
+  // freshness of the fix itself is judged by arrival time above; Doppler / track age in GPS time below, so a
+  // phone clock that is off from GPS time can't hide "pace now"
   const kf = session.kf;
-  if (kf && typeof kf.vs === 'number' && kf.n > 2 && Date.now() - lastFixAt < 5_000) return kf.vs < STOPPED_MS ? null : kf.vs;
-  return rollingSpeed(session.segments[session.segments.length - 1], 30);
+  // newest fix of any quality, in GPS time: a run of unusable fixes (indoors) blanks "pace now" instead of freezing it
+  const ft = lastFix?.t ?? kf?.t ?? 0;
+  if (kf && typeof kf.vs === 'number' && kf.n > 2 && hasDoppler(kf, ft)) return kf.vs < STOPPED_MS ? null : kf.vs;
+  const last = cred[cred.length - 1];
+  if (!last || ft - last.t > 15_000) return null;
+  return creditedSpeed(30);
+}
+
+/**
+ * currentSpeed() for the screen: held until it moves by more than 3 s/km (0.3 km/h) or 5 s pass, so a steady
+ * pace reads as one number instead of flickering 4:43 → 4:47 → 4:44 every second.
+ */
+let shownSpeed: number | null = null;
+let shownAt = 0;
+let smoothSpeed: number | null = null;
+let smoothAt = 0;
+export function steadySpeed(): number | null {
+  const v = currentSpeed();
+  const now = Date.now();
+  if (v == null) { shownSpeed = null; smoothSpeed = null; return null; }
+  // a 5 s average first (the filter's own 3 s one is kept for the stop/start logic), then the deadband
+  smoothSpeed = smoothSpeed == null || now - smoothAt > 10_000 ? v : smoothSpeed + (1 - Math.exp(-(now - smoothAt) / 5000)) * (v - smoothSpeed);
+  smoothAt = now;
+  const sv = smoothSpeed;
+  if (shownSpeed == null || now - shownAt >= 5_000
+    || (now - shownAt >= 3_000 && (Math.abs(1000 / sv - 1000 / shownSpeed) > 3 || Math.abs(sv - shownSpeed) > 0.3 / 3.6))) {
+    shownSpeed = sv; shownAt = now;
+  }
+  return shownSpeed;
+}
+
+/** Close the current lap (at the given moving time / distance). Returns false for a double tap. */
+function closeLap(s: Session, sec: number, dist: number): boolean {
+  const marks = s.laps ?? [];
+  const prev = marks[marks.length - 1] ?? { distanceM: 0, movingSec: 0 };
+  if (sec - prev.movingSec < 3) return false; // ignore double taps
+  s.laps = [...marks, { distanceM: dist, movingSec: sec }];
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+  if (settings.voiceCues) {
+    const d = dist - prev.distanceM, t = sec - prev.movingSec;
+    say(phrase().lap(s.laps.length, (d / 1000).toFixed(2), t));
+  }
+  return true;
 }
 
 /** Close the current lap. */
 export function lap() {
   return locked(async () => {
     if (!session) return;
-    const marks = session.laps ?? [];
-    const dist = session.distanceM ?? 0;
-    const sec = sessionMovingSec(session);
-    const prev = marks[marks.length - 1] ?? { distanceM: 0, movingSec: 0 };
-    if (sec - prev.movingSec < 3) return; // ignore double taps
-    session.laps = [...marks, { distanceM: dist, movingSec: sec }];
+    if (!closeLap(session, sessionMovingSec(session), session.distanceM ?? 0)) return;
     await persist();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    if (settings.voiceCues) {
-      const d = dist - prev.distanceM, t = sec - prev.movingSec;
-      say(phrase().lap(session.laps.length, (d / 1000).toFixed(2), t));
-    }
     notify();
   });
+}
+
+/** Auto-lap every N km, and the one-time distance / time target cues. Called for every kept fix and clock tick. */
+function checkTargets(s: Session, now: number) {
+  const dist = s.distanceM ?? 0, sec = sessionMovingSec(s, now);
+  const lapM = settings.autoLapKm ? settings.autoLapKm * 1000 : 0;
+  if (lapM > 0) {
+    const marks = s.laps ?? [];
+    const lastAt = marks.length ? marks[marks.length - 1].distanceM : 0;
+    // laps close at the marks themselves (2 km, 4 km…), not at the distance a fix happens to land on
+    if (dist - lastAt >= lapM) {
+      const at = lastAt + lapM;
+      const prevSec = marks.length ? marks[marks.length - 1].movingSec : 0;
+      // moving time at the mark: scale the latest interval (good enough within a fix or two)
+      const since = dist - lastAt, lapSec = since > 0 ? prevSec + (sec - prevSec) * (lapM / since) : sec;
+      closeLap(s, lapSec, at);
+    }
+  }
+  s.cued ??= {};
+  if (settings.targetDistanceM && !s.cued.distance && dist >= settings.targetDistanceM) {
+    s.cued.distance = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    if (settings.voiceCues) say(phrase().targetDistance((settings.targetDistanceM / 1000).toFixed(settings.targetDistanceM % 1000 ? 1 : 0)));
+  }
+  if (settings.targetTimeSec && !s.cued.time && sec >= settings.targetTimeSec) {
+    s.cued.time = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    if (settings.voiceCues) say(phrase().targetTime(Math.round(settings.targetTimeSec / 60)));
+  }
 }
 
 // Must be defined at module scope so it is registered when the JS runtime boots in the background.
@@ -334,7 +477,8 @@ export async function restore(): Promise<Session | null> {
   await locked(load);
   if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
   if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
-  if (session) { startSteps(); prepareSpeechAudio(); }
+  if (session) { startSteps(); prepareSpeechAudio(); locked(() => liveStats(true)).catch(() => undefined); }
+  else clearStaleLiveNotification().catch(() => undefined);
   syncWarm();
   notify();
   return session;
@@ -363,6 +507,21 @@ async function isTracking() {
 }
 
 export type PermissionResult = 'background' | 'foreground' | 'denied';
+
+/** Foreground or background access, read without any dialog (call only once foreground is granted). */
+export async function grantedLevel(): Promise<'background' | 'foreground'> {
+  try { return (await Location.getBackgroundPermissionsAsync()).status === 'granted' ? 'background' : 'foreground'; }
+  catch { return 'foreground'; }
+}
+
+/** Where location permission stands, without showing a dialog (the Record tab asks in-app first). */
+export async function permissionStatus(): Promise<'granted' | 'undetermined' | 'denied'> {
+  try {
+    const p = await Location.getForegroundPermissionsAsync();
+    if (p.granted) return 'granted';
+    return p.status === 'undetermined' || p.canAskAgain ? 'undetermined' : 'denied';
+  } catch { return 'undetermined'; }
+}
 export type Precision = 'precise' | 'approximate' | 'off';
 
 /** Whether the OS will hand over GNSS-grade fixes: location on, and precise (not approximate) access. */
@@ -518,6 +677,8 @@ export async function start(sport: Sport, workoutId?: string | null) {
     const created = await locked(async () => {
       await load();
       if (session) return false; // already recording
+      discarded = null; // a new recording makes the old discarded one unrecoverable
+      cred.length = 0;
       const now = Date.now();
       // begin exactly where you stand, but only from a fresh, accurate fix
       // (arrived in the last 3 s and is itself recent: not an old cached fix handed over when GPS started;
@@ -529,7 +690,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
         sport, startedAt: now, status: 'recording', segStartedAt: now, activityId: newActivityId(now),
         pausedMs: 0, pauseStartedAt: null, distanceM: 0, lastCueKm: 0,
         workout: findWorkout(workoutId) ? startProgress(workoutId!, 0, 0) : null,
-        segments: [fresh ? [fresh] : []],
+        segments: [fresh ? [{ ...fresh, d: 0 }] : []],
         kf,
       };
       await persist();
@@ -542,6 +703,7 @@ export async function start(sport: Sport, workoutId?: string | null) {
     await startUpdates();
     startSteps();
     syncWarm(); // the recording's own updates take over from the pre-start GPS
+    if (settings.liveNotification) ensureLiveNotificationPermission().then((ok) => { if (ok) return locked(() => liveStats(true)); }).catch(() => undefined);
     const w = findWorkout(workoutId);
     if (w && session?.workout) say(`${w.name}. ${stepCue(w, session.workout)}`, 'en');
     notify();
@@ -553,11 +715,13 @@ export async function start(sport: Sport, workoutId?: string | null) {
 export function pause() {
   return locked(async () => {
     if (!session || session.status !== 'recording') return;
+    settleDistance(session);
     session.status = 'paused';
     session.autoPaused = false;
     session.pauseStartedAt = Date.now();
     await persist();
     notify();
+    await liveStats(true);
   });
 }
 
@@ -571,21 +735,53 @@ export function resume() {
     session.pauseStartedAt = null;
     session.status = 'recording';
     session.autoPaused = false;
-    session.kf = null;
+    session.ds = undefined; // the filter keeps its state (it resets itself after a long gap)
+    session.moveN = 0; session.hopN = 0;
+    cred.length = 0;
     session.segments.push([]);
     session.segStartedAt = now;
     await persist();
     notify();
+    await liveStats(true);
   });
 }
+
+/** The last discarded recording, kept in memory for a short while so a mistaken tap can be undone. */
+let discarded: { session: Session; at: number } | null = null;
+export const UNDO_DISCARD_MS = 15_000;
 
 export async function discard() {
   Speech.stop();
   stopSteps();
   await stopUpdates();
-  await locked(async () => { session = null; await persist(); });
+  await locked(async () => {
+    if (session) discarded = { session: { ...session, status: 'paused', pauseStartedAt: session.pauseStartedAt ?? Date.now() }, at: Date.now() };
+    session = null;
+    await persist();
+    await clearLiveNotification();
+  });
   syncWarm();
   notify();
+}
+
+/** Bring back the recording discarded a moment ago (paused). Returns false if there is nothing to restore. */
+export async function undoDiscard(): Promise<boolean> {
+  const d = discarded;
+  if (!d || Date.now() - d.at > UNDO_DISCARD_MS) return false;
+  discarded = null;
+  const ok = await locked(async () => {
+    await load();
+    if (session) return false; // a new recording has started meanwhile
+    session = d.session;
+    await persist();
+    return true;
+  });
+  if (ok) {
+    // discard() stopped GPS; a paused recording normally still has it running, so Resume expects it on
+    if (!(await isTracking())) { lastFixAt = Date.now(); restartedAt = 0; await startUpdates().catch(() => undefined); }
+    startSteps(); syncWarm(); notify(); locked(() => liveStats(true)).catch(() => undefined);
+  }
+  return ok;
 }
 
 export async function finish(): Promise<Activity | null> {
@@ -599,10 +795,13 @@ export async function finish(): Promise<Activity | null> {
     const segments = s.segments.filter((seg) => seg.length > 1);
     const now = Date.now();
     const movingSec = Math.round(sessionMovingSec(s, now));
-    const distanceM = totalDistance(segments);
+    if (s.status === 'recording') settleDistance(s);
+    // the running total is the accurate one (Doppler-integrated / smoothed, see live.ts distanceStep);
+    // the plain point-to-point sum is only a fallback for sessions saved by older versions
+    const distanceM = Math.round(s.distanceM != null && s.distanceM > 0 ? s.distanceM : totalDistance(segments));
     const a: Activity = {
       id: (s.activityId ??= newActivityId(s.startedAt)), // stable across retries: a retried save overwrites
-      name: defaultName(s.sport, s.startedAt),
+      name: defaultName(s.sport, s.startedAt, settings.language),
       sport: s.sport,
       startedAt: s.startedAt,
       movingSec,
@@ -620,6 +819,7 @@ export async function finish(): Promise<Activity | null> {
     // the recording stays (paused) so nothing is lost and Save can simply be tried again.
     try {
       await saveActivity(a);
+      discarded = null;
     } catch (e) {
       if (s.status === 'recording') { s.status = 'paused'; s.autoPaused = false; s.pauseStartedAt = now; }
       await persist().catch(() => undefined);
@@ -627,6 +827,7 @@ export async function finish(): Promise<Activity | null> {
     }
     session = null;
     await persist();
+    await clearLiveNotification();
     return a;
   });
   if (activity) autoSync();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { decodeFields, encodeFields } from './firebase.ts';
-import { currentWeekKm, normalizeCode, randomCode, rankBoard } from './friends.ts';
+import { currentWeekKm, myPeriodKm, normalizeCode, periodKm, randomCode, rankBoard } from './friends.ts';
 
 test('friend IDs: format and normalising what people type', () => {
   for (let i = 0; i < 200; i++) assert.match(randomCode(), /^STR-[A-HJ-NP-Z2-9]{5}$/); // no 0/O/1/I
@@ -36,4 +36,54 @@ test('Firestore field encoding round-trips', () => {
   assert.deepEqual(f.weekStart, { integerValue: '1793577600000' });
   assert.deepEqual(f.weekKm, { doubleValue: 12.34 });
   assert.deepEqual(decodeFields(f), doc);
+});
+
+test('period km: week, month (with grace) and all-time', () => {
+  const monday = new Date(2026, 10, 2).getTime(), month1 = new Date(2026, 10, 1).getTime();
+  const mine = { name: 'me', weekKm: 1, weekStart: monday, monthKm: 2, monthStart: month1, totalKm: 3 };
+  const friend = { weekKm: 10, weekStart: monday, monthKm: 40, monthStart: month1, totalKm: 400 };
+  assert.equal(periodKm(friend, 'week', mine), 10);
+  assert.equal(periodKm(friend, 'month', mine), 40);
+  assert.equal(periodKm(friend, 'all', mine), 400);
+  assert.equal(periodKm({ ...friend, monthStart: month1 - 40 * 86400000 }, 'month', mine), 0); // last month's number
+  assert.equal(periodKm({ weekKm: 10, weekStart: monday }, 'month', mine), 0); // older app without month data
+  assert.equal(periodKm({ weekKm: 10, weekStart: monday }, 'all', mine), 0);
+  assert.deepEqual(['week', 'month', 'all'].map((p) => myPeriodKm(mine, p as never)), [1, 2, 3]);
+});
+
+test('share: rules published before v1.3.9 reject month/all-time fields → weekly profile still written, retried later', async () => {
+  const { createFriends } = await import('./friends.ts');
+  const { FirebaseError } = await import('./firebase.ts');
+  let clock = Date.UTC(2026, 10, 4, 12);
+  let newRules = false;
+  const writes: Record<string, unknown>[] = [];
+  const client = {
+    uid: async () => 'u1', signIn: async () => 'u1', get: async () => null, create: async () => undefined,
+    set: async (_path: string, doc: Record<string, unknown>) => {
+      if (!newRules && 'monthKm' in doc) throw new FirebaseError('PERMISSION_DENIED', 403);
+      writes.push(doc);
+    },
+  } as unknown as Parameters<typeof createFriends>[0]['client'];
+  let kvVal: string | null = null;
+  let stats = { name: 'Asha', weekKm: 5, weekStart: 0, monthKm: 20, monthStart: 0, totalKm: 100 };
+  const f = createFriends({ client, kv: { get: async () => kvVal, set: async (v: string | null) => { kvVal = v; } }, stats: async () => stats, now: () => clock });
+  await f.enable();
+  assert.equal(writes.length, 1);
+  assert.deepEqual(Object.keys(writes[0]).sort(), ['code', 'name', 'updatedAt', 'weekKm', 'weekStart']);
+  // a new run: weekly fields only, no wasted full write while the old rules are known to be up
+  stats = { ...stats, weekKm: 8 };
+  await f.share();
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].weekKm, 8);
+  assert.ok(!('monthKm' in writes[1]));
+  // nothing changed: nothing written
+  await f.share();
+  assert.equal(writes.length, 2);
+  // rules published; after the retry window the full profile goes up on its own
+  newRules = true;
+  clock += 7 * 3600_000;
+  await f.share();
+  assert.equal(writes.length, 3);
+  assert.equal(writes[2].monthKm, 20);
+  assert.equal(writes[2].totalKm, 100);
 });

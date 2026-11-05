@@ -4,6 +4,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { NeuCard, NeuProgress } from '../components/Neu';
 import { evaluateAchievements, type Achievement } from '../lib/achievements';
 import { wellnessBadges } from '../lib/health';
+import { badgeDetail, badgeTitle, useT } from '../lib/i18n';
 import { getProfile } from '../lib/storage';
 import { useTheme } from '../lib/theme';
 import { useActivities } from '../lib/useActivities';
@@ -13,20 +14,21 @@ const order = (list: Achievement[]) => [...list].sort((a, b) => Number(b.earned)
 
 export default function Achievements() {
   const { C, S, F } = useTheme();
+  const { t } = useT();
   const { items } = useActivities();
   const log = useWellness();
   const [weight, setWeight] = useState(70);
   useEffect(() => { getProfile().then((p) => setWeight(p.weightKg || 70)); }, []);
   const groups = [
-    { title: 'Wellness', list: order(wellnessBadges(log ?? {}, items ?? [], weight)) },
-    { title: 'Activity', list: order(evaluateAchievements(items ?? [])) },
+    { title: t('ach.wellness'), list: order(wellnessBadges(log ?? {}, items ?? [], weight)) },
+    { title: t('ach.activity'), list: order(evaluateAchievements(items ?? [])) },
   ];
   const all = groups.flatMap((g) => g.list);
   const earned = all.filter((x) => x.earned).length;
 
   return (
     <ScrollView contentContainerStyle={{ padding: 20, gap: 18, paddingBottom: 60 }}>
-      <Text style={{ color: C.muted }}>{earned} of {all.length} earned</Text>
+      <Text style={{ color: C.muted }}>{t('ach.earnedOf').replace('{n}', String(earned)).replace('{of}', String(all.length))}</Text>
       {groups.map((g) => (
         <View key={g.title} style={{ gap: 14 }}>
           <Text style={[F.label, { marginLeft: 6 }]}>{g.title}</Text>
@@ -37,11 +39,11 @@ export default function Achievements() {
                   backgroundColor: b.earned ? C.accent : C.bg, boxShadow: b.earned ? S.glow : S.inset }}>
                   <MaterialCommunityIcons name={b.icon as never} size={32} color={b.earned ? C.accentText : C.faint} />
                 </View>
-                <Text style={[F.h2, { fontSize: 15, textAlign: 'center' }]}>{b.title}</Text>
-                <Text style={{ color: C.muted, fontSize: 12, textAlign: 'center' }}>{b.detail}</Text>
+                <Text style={[F.h2, { fontSize: 15, textAlign: 'center' }]}>{badgeTitle(t, b.id)}</Text>
+                <Text style={{ color: C.muted, fontSize: 12, textAlign: 'center' }}>{badgeDetail(t, b.id)}</Text>
                 {b.earned ? (
                   <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>
-                    {b.earnedAt ? new Date(b.earnedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'Earned'}
+                    {b.earnedAt ? new Date(b.earnedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : t('ach.earned')}
                   </Text>
                 ) : (
                   <View style={{ alignSelf: 'stretch', gap: 4 }}>

@@ -17,12 +17,14 @@ export const friendsAvailable = !!(cfg?.apiKey && cfg?.projectId);
 const CRED_KEY = 'stride_firebase_session';
 const LOCAL_KEY = 'stride:friends';
 
-/** Name and total distance (all sports) since Monday. */
+/** Name and total distance (all sports) this week, this month and ever. */
 async function myWeek(): Promise<MyStats> {
-  const weekStart = mondayOf(Date.now());
+  const now = new Date();
+  const weekStart = mondayOf(now.getTime());
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const [acts, profile] = await Promise.all([listActivities(), getProfile()]);
-  const m = acts.filter((a) => a.startedAt >= weekStart).reduce((s, a) => s + a.distanceM, 0);
-  return { name: profile.name, weekKm: m / 1000, weekStart };
+  const sum = (from: number) => acts.filter((a) => a.startedAt >= from).reduce((s, a) => s + a.distanceM, 0) / 1000;
+  return { name: profile.name, weekKm: sum(weekStart), weekStart, monthKm: sum(monthStart), monthStart, totalKm: sum(0) };
 }
 
 export const friends: Friends | null = friendsAvailable

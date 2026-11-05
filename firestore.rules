@@ -23,10 +23,13 @@ service cloud.firestore {
     match /profiles/{uid} {
       allow get: if signedIn() && (uid == me() || isFriend(uid));
       allow create, update: if signedIn() && uid == me()
-        && request.resource.data.keys().hasOnly(['code', 'name', 'weekKm', 'weekStart', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['code', 'name', 'weekKm', 'weekStart', 'monthKm', 'monthStart', 'totalKm', 'updatedAt'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 40
         && request.resource.data.weekKm is number && request.resource.data.weekKm >= 0 && request.resource.data.weekKm < 100000
         && request.resource.data.weekStart is int && request.resource.data.updatedAt is int
+        && (!('monthKm' in request.resource.data) || (request.resource.data.monthKm is number && request.resource.data.monthKm >= 0 && request.resource.data.monthKm < 100000))
+        && (!('monthStart' in request.resource.data) || request.resource.data.monthStart is int)
+        && (!('totalKm' in request.resource.data) || (request.resource.data.totalKm is number && request.resource.data.totalKm >= 0 && request.resource.data.totalKm < 10000000))
         && request.resource.data.code is string && ownsCode(request.resource.data.code);
       allow delete: if signedIn() && uid == me();
     }
