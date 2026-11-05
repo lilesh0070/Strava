@@ -70,12 +70,14 @@ export type Settings = {
   workStartH: number;
   workEndH: number;
   workDays: 'mon-fri' | 'mon-sat';
+  keepScreenOn: boolean; // keep the display on while the Record tab is open during a recording
 };
 export const DEFAULT_SETTINGS: Settings = {
   voiceCues: true, autoPause: false, countdown: true, theme: 'system', gpsMode: 'precise', autoCheckUpdates: true, betaUpdates: false, targetPaceSec: null,
   autoLapKm: null, targetDistanceM: null, targetTimeSec: null, liveNotification: true,
   reminder: false, reminderHour: 18, language: 'en',
   breakReminders: false, breakEveryMin: 60, workStartH: 9, workEndH: 18, workDays: 'mon-fri',
+  keepScreenOn: false,
 };
 
 export type Session = {

@@ -12,6 +12,7 @@ import { useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import { friendlyError, fromApiRelease, fromManifest, needsReinstall, newestRelease, pickUpdate, type ApkRelease } from './releaseInfo';
 import { getSettings } from './storage';
+import { getSession } from './tracker';
 
 export type { ApkRelease } from './releaseInfo';
 
@@ -151,10 +152,17 @@ function cleanOldApks(keep: string) {
   } catch { /* best effort */ }
 }
 
+/**
+ * `error` while an activity is being recorded: installing replaces the app, which ends its process and
+ * the GPS foreground service, and the app doesn't reopen by itself afterwards. Screens show it translated.
+ */
+export const RECORDING_ACTIVE = 'recording-active';
+
 /** Download the newer APK (reusing a complete earlier download) and open the system installer. */
 export async function installApk(): Promise<void> {
   const rel = state.apk;
   if (!rel || state.apkProgress != null || state.reinstall) return; // a key change can't install over this app
+  if (getSession()) { set({ error: RECORDING_ACTIVE }); return; }
   set({ apkProgress: 0, error: null });
   try {
     const name = `tbdi-fittrack-${rel.version}.apk`;
@@ -180,6 +188,8 @@ export async function installApk(): Promise<void> {
       if (got.toLowerCase() !== rel.sha256) { file.delete(); throw new Error('The downloaded file does not match the release. Please try again.'); }
     }
     set({ apkProgress: 1 });
+    // a recording may have started during the download: the complete file is kept for later
+    if (getSession()) { set({ error: RECORDING_ACTIVE }); return; }
     await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
       data: (file as unknown as { contentUri: string }).contentUri,
       type: 'application/vnd.android.package-archive',

@@ -34,7 +34,21 @@ const useTracker = () => {
   return { session: tracker.getSession(), fix: tracker.getLastFix() };
 };
 
-function KeepAwake() { useKeepAwake(); return null; }
+/**
+ * Keeps the display on, if the user turned that on (Settings → Recording, off by default: a lit screen
+ * costs more battery than GPS and takes pocket taps). Mounted only while this tab is focused, so the
+ * setting is read again every time the user comes back from Settings.
+ */
+function KeepAwake() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    getSettings().then((s) => { if (live) setOn(s.keepScreenOn); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  return on ? <ScreenOn /> : null;
+}
+function ScreenOn() { useKeepAwake(); return null; }
 /** Stable empty route, so the map doesn't redraw every second before Start. */
 const NO_SEGMENTS: never[] = [];
 const MAP_STYLE = { flex: 1, borderRadius: 26 } as const;
@@ -313,7 +327,7 @@ export default function Record() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {active?.status === 'recording' && <KeepAwake />}
+      {focused && active?.status === 'recording' && <KeepAwake />}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
         <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE}
