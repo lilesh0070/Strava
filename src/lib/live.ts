@@ -157,7 +157,7 @@ export type DistanceState = {
   ax?: number; ay?: number;
   /** Position to store for the route (the smoothed one on the no-Doppler path). */
   tx?: number; ty?: number;
-  /** Standing still, with hysteresis: entered after 2 slow fixes, left after 2 fast ones, 5 slow-but-moving ones or a real move. */
+  /** Standing still, with hysteresis: entered after 3 slow fixes, left after 2 fast ones, 5 slow-but-moving ones or a real move. */
   still?: boolean; slowN?: number; fastN?: number; midN?: number; midSum?: number; qx?: number; qy?: number; stillT?: number;
 };
 
@@ -165,6 +165,11 @@ export type DistanceState = {
 export const MAX_GAP_SEC = 5;
 /** Filtered speed needed (twice in a row) to leave the still state. */
 export const MOVING_MS = 0.8;
+/**
+ * Below this on three fixes in a row the still state begins. A real stop settles at ~0.1 m/s within a few
+ * seconds; a 0.5 m/s hiker's filtered speed (σ ≈ 0.15) rarely dips under it three times running.
+ */
+export const STILL_MS = 0.25;
 
 const cur = (ds: DistanceState) => (ds.st != null ? [ds.sx, ds.sy] : [ds.fx, ds.fy]);
 
@@ -219,15 +224,20 @@ export function distanceStep(ds: DistanceState, kf: KalmanState, f: GpsFix, spor
   const wasStill = !!ds.still;
   let retro = 0; // speed counted as 0 while "still" that turned out to be a slow start
   if (!ds.still) {
-    ds.slowN = raw < STOPPED_MS ? (ds.slowN ?? 0) + 1 : 0;
-    if (ds.slowN >= 2) { ds.still = true; ds.stillT = f.t; ds.qx = px; ds.qy = py; ds.fastN = 0; ds.midN = 0; ds.midSum = 0; }
+    ds.slowN = raw < STILL_MS ? (ds.slowN ?? 0) + 1 : 0;
+    if (ds.slowN >= 3) { ds.still = true; ds.stillT = f.t; ds.qx = px; ds.qy = py; ds.fastN = 0; ds.midN = 0; ds.midSum = 0; }
   } else {
     ds.fastN = raw >= MOVING_MS ? (ds.fastN ?? 0) + 1 : 0;
     if (raw >= 0.5) { ds.midN = (ds.midN ?? 0) + 1; ds.midSum = (ds.midSum ?? 0) + raw * dt; } else { ds.midN = 0; ds.midSum = 0; }
-    const movedOut = ds.qx != null && ds.qy != null && Math.hypot(px - ds.qx, py - ds.qy) >= Math.max(8, 0.8 * acc);
+    const hop = ds.qx != null && ds.qy != null ? Math.hypot(px - ds.qx, py - ds.qy) : 0;
+    const movedOut = hop >= Math.max(8, 0.8 * acc);
     if (ds.fastN >= 2 || ds.midN >= 5 || movedOut) {
       ds.still = false; ds.slowN = 0;
-      if (ds.fastN >= 2 || ds.midN >= 5) retro = ds.midSum ?? 0; // a slow walker or hiker, not a wobble
+      // What moved while "still" counted as 0. Credit the slow-but-moving fixes, or the whole hop from the
+      // stop point when it was covered at a walking rate (a 0.5 m/s hiker on a steep trail dips under the
+      // threshold all the time); a real stop's wander is slower than that and stays uncredited.
+      const sec = ds.stillT != null ? (f.t - ds.stillT) / 1000 : 0;
+      retro = Math.max(ds.midSum ?? 0, sec > 0 && hop / sec >= 0.3 && hop >= acc ? hop : 0);
     }
   }
   const still = !!ds.still;
@@ -246,7 +256,7 @@ export function distanceStep(ds: DistanceState, kf: KalmanState, f: GpsFix, spor
         const sdt = Math.max(0, (f.t - ds.st) / 1000);
         // time constant ~10 s at 2 m/s and ±8 m, longer when slower or less accurate (standing still it
         // barely moves), shorter when fast so bends are not cut
-        const tc = 10 * Math.max(0.5, Math.min(3, acc / 8)) * Math.max(0.5, Math.min(3, 2 / Math.max(raw, 0.5)));
+        const tc = 10 * Math.max(0.5, Math.min(3, acc / 8)) * Math.max(0.25, Math.min(3, 2 / Math.max(raw, 0.5)));
         const a = 1 - Math.exp(-sdt / tc);
         ds.sx += a * (px - ds.sx); ds.sy += a * (py - ds.sy);
       }
@@ -265,6 +275,23 @@ export function distanceStep(ds: DistanceState, kf: KalmanState, f: GpsFix, spor
   }
   ds.fx = px; ds.fy = py; ds.ft = f.t; ds.fv = speed; ds.tx = tx; ds.ty = ty;
   return { add, still, lat: ds.lat0 + ty / M_PER_DEG, lng: ds.lng0 + tx / ds.kx };
+}
+
+// ---------- speed from the recorded distance ----------
+/** (time, recorded distance) sample for every filtered fix; see creditedSpeed(). */
+export type CreditSample = { t: number; d: number };
+/**
+ * Average speed (m/s) over the last `windowSec` of recorded distance, or null without enough data. Agrees with
+ * the headline distance instead of re-measuring stored points (which read 20-40 % too fast without Doppler).
+ */
+export function creditedSpeed(samples: CreditSample[], windowSec: number): number | null {
+  const last = samples[samples.length - 1];
+  if (!last) return null;
+  let i = samples.length - 1;
+  while (i > 0 && last.t - samples[i - 1].t <= windowSec * 1000) i--;
+  const span = (last.t - samples[i].t) / 1000;
+  if (span < Math.min(10, windowSec / 2)) return null;
+  return (last.d - samples[i].d) / span;
 }
 
 // ---------- rolling pace ----------

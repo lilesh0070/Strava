@@ -1,10 +1,11 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Alert, Animated, AppState, LayoutAnimation, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NeuButton, NeuCard, NeuIconButton, NeuProgress } from '../../components/Neu';
+import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress } from '../../components/Neu';
 import RouteMap from '../../components/RouteMap';
 import SettingsButton from '../../components/SettingsButton';
 import Stat from '../../components/Stat';
@@ -17,12 +18,13 @@ import { getProfile, getSettings, listActivities, updateSettings } from '../../l
 import { useActivities } from '../../lib/useActivities';
 import { mondayOf } from '../../lib/coach';
 import { showToast } from '../../lib/toast';
+import { celebrate } from '../../lib/celebrate';
 import { useSelectedWorkout } from '../../lib/workoutSelection';
-import { findWorkout, remaining, stepLabel } from '../../lib/workouts';
+import { findWorkout, remaining, stepKey } from '../../lib/workouts';
 import { useTheme } from '../../lib/theme';
 import * as tracker from '../../lib/tracker';
 import { SPORTS, sessionMovingSec, sportInfo, workoutSec, type Sport } from '../../lib/types';
-import { sportName, useT } from '../../lib/i18n';
+import { badgeTitle, prLabel, sportName, useT } from '../../lib/i18n';
 
 // Snapshot changes identity on every tracker notification so React re-renders.
 let version = 0;
@@ -94,7 +96,8 @@ export default function Record() {
     const ws = mondayOf(loadedAt);
     return (items ?? []).filter((a) => a.startedAt >= ws).reduce((s, a) => s + a.distanceM, 0) / 1000;
   }, [items, loadedAt]);
-  const [perm, setPerm] = useState<tracker.PermissionResult | null>(null);
+  const [perm, setPerm] = useState<tracker.PermissionResult | 'unasked' | null>(null);
+  const [mapOffline, setMapOffline] = useState(false);
   const [precision, setPrecision] = useState<tracker.Precision>('precise');
   const [focused, setFocused] = useState(true);
   useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
@@ -125,18 +128,30 @@ export default function Record() {
   useFocusEffect(useCallback(() => {
     let cancelled = false;
     const checkPrecision = () => tracker.locationPrecision().then((p) => { if (!cancelled) setPrecision(p); });
-    // only asks for foreground location here; "Allow all the time" is asked once, on Start
-    tracker.ensurePermissions(false).then((p) => {
+    // No OS dialog just for opening the tab: when permission was never asked, a card in the map explains and
+    // offers it; "Allow all the time" is asked once, on Start.
+    const check = () => tracker.permissionStatus().then(async (st) => {
+      if (cancelled) return;
+      if (st !== 'granted') { setPerm(st === 'denied' ? 'denied' : 'unasked'); return; }
+      const p = await tracker.ensurePermissions(false); // already granted: no dialog, tells us foreground vs background
+      if (cancelled) return;
       setPerm(p);
-      if (p === 'denied' || cancelled) return;
       checkPrecision();
       tracker.setWarmUp(true);
     });
+    check();
     const id = setInterval(() => { if (!tracker.getSession()) setNow(Date.now()); }, 1000);
-    // back from system settings: the user may have just turned on precise location
-    const app = AppState.addEventListener('change', (st) => { if (st === 'active') checkPrecision(); });
+    // back from system settings: the user may have just allowed location or turned on precise location
+    const app = AppState.addEventListener('change', (st) => { if (st === 'active') check(); });
     return () => { cancelled = true; tracker.setWarmUp(false); clearInterval(id); app.remove(); };
   }, []));
+  const allowLocation = async () => {
+    const p = await tracker.ensurePermissions(false);
+    setPerm(p);
+    if (p === 'denied') return;
+    tracker.locationPrecision().then(setPrecision).catch(() => undefined);
+    tracker.setWarmUp(true);
+  };
 
   const active = session ?? null;
   const info = sportInfo(active?.sport ?? sport);
@@ -263,11 +278,11 @@ export default function Record() {
     setPhase('idle');
     if (!a) return;
     router.push(`/activity/${a.id}`);
-    const lines = [
-      ...newRecords(before, a).map((r) => `🏆 ${t('rec.newPr')}: ${r.label}${r.kind === 'effort' ? ` — ${fmtDuration(r.value)}` : ''}`),
-      ...newlyEarned(before, a).map((b) => `🏅 ${t('rec.badge')}: ${b.title}`),
-    ];
-    if (lines.length) Alert.alert(t('rec.nice'), lines.join('\n'));
+    celebrate([
+      ...newRecords(before, a).map((r) => ({ kind: 'pr' as const, title: prLabel(t, r),
+        value: r.kind === 'effort' ? fmtDuration(r.value) : r.kind === 'longest' ? `${fmtKm(r.value)} km` : `${Math.round(r.value)} m` })),
+      ...newlyEarned(before, a).map((b) => ({ kind: 'badge' as const, title: badgeTitle(t, b.id), icon: b.icon })),
+    ]);
   };
 
   const onFinish = () => {
@@ -288,14 +303,27 @@ export default function Record() {
       {active?.status === 'recording' && <KeepAwake />}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
-        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE} />
+        <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE}
+          onTiles={(s) => setMapOffline(s === 'offline')} />
+        {perm === 'unasked' && !active && (
+          <View style={{ position: 'absolute', left: 24, right: 24, top: '30%', alignItems: 'center' }}>
+            <NeuCard radius={26} style={{ alignItems: 'center', gap: 12, width: '100%' }}>
+              <IconWell icon="map-marker-radius-outline" />
+              <Text style={{ color: C.text, textAlign: 'center', fontWeight: '600' }}>{t('rec.locWhy')}</Text>
+              <NeuButton accent small icon="crosshairs-gps" label={t('rec.allowLoc')} onPress={allowLocation} />
+            </NeuCard>
+          </View>
+        )}
         <View style={{ position: 'absolute', top: 16, left: 16, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Pressable disabled={precision === 'precise'} onPress={fixPrecision} accessibilityRole="button">
+          <Pressable disabled={precision === 'precise' && perm !== 'denied'} accessibilityRole="button"
+            onPress={() => { if (perm === 'denied') Linking.openSettings().catch(() => undefined); else fixPrecision(); }}>
             {pill(<>
               <View style={{ width: 9, height: 9, borderRadius: 5,
-                backgroundColor: precision === 'off' ? C.danger : gpsOk ? C.success : precision === 'approximate' || health === 'weak' ? '#F5A524' : C.danger }} />
+                backgroundColor: precision === 'off' || perm === 'denied' ? C.danger : gpsOk ? C.success : precision === 'approximate' || health === 'weak' ? C.warnInk : C.danger }} />
               <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
-                {precision === 'off' ? t('rec.locOff')
+                {perm === 'denied' ? t('rec.locDenied')
+                  : perm === 'unasked' ? t('rec.allowLoc')
+                  : precision === 'off' ? t('rec.locOff')
                   : precision === 'approximate' ? t('rec.approx')
                   : gpsOk ? `GPS ±${Math.round(fix?.acc ?? 0)} m`
                   : health === 'weak' ? `${t('rec.weak')} ±${Math.round(fix?.acc ?? 0)} m`
@@ -305,9 +333,13 @@ export default function Record() {
           </Pressable>
           <SettingsButton />
         </View>
-        {perm === 'foreground' && (
-          <View style={{ position: 'absolute', bottom: 16, alignSelf: 'center' }}>
-            {pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
+        {(perm === 'foreground' || mapOffline) && (
+          <View style={{ position: 'absolute', bottom: 16, left: 16, right: 16, alignItems: 'center', gap: 6 }}>
+            {mapOffline && pill(<>
+              <MaterialCommunityIcons name="wifi-off" size={13} color={C.muted} />
+              <Text style={{ color: C.muted, fontSize: 11, flexShrink: 1 }} numberOfLines={2}>{t('map.offline')}</Text>
+            </>)}
+            {perm === 'foreground' && pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
           </View>
         )}
       </View>
@@ -384,7 +416,7 @@ export default function Record() {
               return (
                 <NeuCard inset radius={20} padding={12} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={{ color: step.kind === 'work' ? C.accentInk : C.muted, fontWeight: '800' }}>
-                    {stepLabel(step)} · {active.workout.index + 1}/{w.steps.length}
+                    {t(stepKey(step))} · {active.workout.index + 1}/{w.steps.length}
                   </Text>
                   <Text style={{ color: C.text, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
                     {step.by === 'distance' ? `${Math.round(left)} m ${t('rec.left')}` : `${fmtDuration(left)} ${t('rec.left')}`}
@@ -440,7 +472,7 @@ export default function Record() {
                 );
               })}
             </View>
-            <NeuButton small icon="timer-outline" label={findWorkout(selectedWorkout)?.name ?? t('rec.free')}
+            <NeuButton small icon="timer-outline" label={t(findWorkout(selectedWorkout)?.nameKey ?? 'rec.free')}
               selected={!!selectedWorkout} onPress={() => router.push('/workouts')} style={{ alignSelf: 'center' }} />
             <View style={{ alignItems: 'center', justifyContent: 'center' }}>
               <ReadyGlow on={gpsOk && phase === 'idle'} color={C.accent} size={84} />

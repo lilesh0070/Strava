@@ -20,6 +20,8 @@ export type Palette = {
   accentInk: string;
   successInk: string;
   warnInk: string;
+  infoInk: string;
+  dangerInk: string;
   hi: string; // highlight shadow
   lo: string; // dark shadow
 };
@@ -28,7 +30,7 @@ const light: Palette = {
   scheme: 'light',
   bg: '#E9EDF3',
   text: '#2A3140',
-  muted: '#6F7889',
+  muted: '#5F6879', // 4.8:1 on bg: small labels stay readable in sunlight
   faint: '#C3CAD5',
   accent: '#F2762E',
   accentText: '#FFFFFF',
@@ -38,6 +40,8 @@ const light: Palette = {
   accentInk: '#B5490F', // 4.6:1 on bg
   successInk: '#1F7A4C',
   warnInk: '#9A5B00',
+  infoInk: '#1A62BE',
+  dangerInk: '#B3261E',
   hi: '#FFFFFF',
   lo: '#C3CBD8',
 };
@@ -56,6 +60,8 @@ const dark: Palette = {
   accentInk: '#FF8A47', // the fills already pass on the dark background
   successInk: '#4CC38A',
   warnInk: '#F5A524',
+  infoInk: '#3B9EFF',
+  dangerInk: '#FF6369',
   hi: '#323741',
   lo: '#181B20',
 };
@@ -77,7 +83,7 @@ function typography(c: Palette) {
     h1: { fontSize: 28, fontWeight: '800', color: c.text, letterSpacing: -0.5 } as TextStyle,
     h2: { fontSize: 18, fontWeight: '700', color: c.text } as TextStyle,
     body: { fontSize: 15, color: c.text } as TextStyle,
-    label: { fontSize: 11, color: c.muted, letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: '600' } as TextStyle,
+    label: { fontSize: 12, color: c.muted, letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: '600' } as TextStyle,
   };
 }
 

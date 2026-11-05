@@ -81,6 +81,8 @@ async function readActivityRaw(id: string): Promise<string | null> {
   return (await readBlob(blobKey(id))) ?? (await AsyncStorage.getItem(item(id)).catch(() => null));
 }
 
+/** Bump when bestEffort() changes meaning (v2: per segment, never across a pause) so cached PRs are rebuilt. */
+export const EFFORTS_V = 2;
 export function toSummary(a: Activity): Activity {
   const efforts: Record<string, number> = {};
   if (a.sport === 'run' && !a.manual) {
@@ -89,7 +91,7 @@ export function toSummary(a: Activity): Activity {
       if (t != null) efforts[m] = t;
     }
   }
-  return { ...a, lite: true, efforts, segments: a.segments.map((g) => simplify(g, 8)) };
+  return { ...a, lite: true, efforts, effortsV: EFFORTS_V, segments: a.segments.map((g) => simplify(g, 8)) };
 }
 
 let summaryCache: Record<string, Activity> | null = null;
@@ -118,11 +120,12 @@ export async function listActivities(): Promise<Activity[]> {
   const ids = await readIndex();
   if (!ids.length) return [];
   let map = await readSummaries();
-  if (ids.some((id) => !map[id])) {
+  const stale = (s: Activity | undefined) => !s || (s.sport === 'run' && !s.manual && s.effortsV !== EFFORTS_V);
+  if (ids.some((id) => stale(map[id]))) {
     // queued with the writes, so a save that happens meanwhile can't be replaced by an older summary
     map = await serial(async () => {
       const cur = await readSummaries();
-      const missing = ids.filter((id) => !cur[id]);
+      const missing = ids.filter((id) => stale(cur[id]));
       if (!missing.length) return cur;
       const next = { ...cur };
       for (const a of await Promise.all(missing.map(readActivitySafe))) if (a) next[a.id] = toSummary(a);

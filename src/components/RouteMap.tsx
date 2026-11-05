@@ -8,6 +8,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Linking, View, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView as RNWebView, type WebViewProps } from 'react-native-webview';
 import type { Point } from '../lib/geo';
+import { LEAFLET_CSS, LEAFLET_JS } from '../lib/leafletSrc';
 import { mapState, routeUpdate, type MapState } from '../lib/routeSync';
 import { useTheme, type Palette } from '../lib/theme';
 
@@ -25,6 +26,8 @@ type Props = {
   paused?: boolean;
   /** Change this (e.g. a filter value) to re-frame the map around the new routes. */
   fitKey?: string;
+  /** Street tiles could not be loaded (no internet) / are loading again. The route still draws. */
+  onTiles?: (state: 'offline' | 'online') => void;
 };
 
 /** Links (e.g. the OSM attribution) open in the browser instead of replacing the map. */
@@ -34,33 +37,58 @@ const onNavigate = (req: { url: string }) => {
   return false;
 };
 
+// Leaflet is inlined (src/lib/leafletSrc.ts), so the route and the position dot draw with no internet; only
+// the street tiles need data. Missing tiles show the page background and the app is told once ('tiles-offline').
 const buildHtml = (C: Palette) => `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>${LEAFLET_CSS}</style>
 <style>html,body,#m{margin:0;height:100%;background:${C.bg}}
+#m{opacity:0;transition:opacity .5s}
 .leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.6)!important}
 .leaflet-tile-pane{filter:${C.scheme === 'dark' ? 'invert(.92) hue-rotate(180deg) saturate(.4) brightness(.9)' : 'saturate(.35) brightness(1.04)'}}</style>
-</head><body><div id="m"></div><script>
-var map=L.map('m',{zoomControl:false,attributionControl:true}).setView([20.59,78.96],4);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+</head><body><div id="m"></div><script>${LEAFLET_JS}</script><script>
+var post=function(m){ if(window.ReactNativeWebView) window.ReactNativeWebView.postMessage(m); };
+var map=L.map('m',{zoomControl:false,attributionControl:true});
+var tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap',
+  errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}).addTo(map);
+var offline=false;
+tiles.on('tileerror',function(){ if(!offline){ offline=true; post('tiles-offline'); } });
+tiles.on('tileload',function(){ if(offline){ offline=false; post('tiles-online'); } });
 map.attributionControl.setPrefix(false);
-var lines=L.layerGroup().addTo(map), marks=L.layerGroup().addTo(map), me=null, fitted=false, polys=[], fitKey=null;
+var lines=L.layerGroup().addTo(map), marks=L.layerGroup().addTo(map), me=null, fitted=false, polys=[], fitKey=null, shown=false, anim=null;
 var style={color:'${C.route}',weight:5,opacity:.95};
+function show(){ if(!shown){ shown=true; document.getElementById('m').style.opacity=1; } }
 function dot(ll,c,r){return L.circleMarker(ll,{radius:r||6,color:'#fff',weight:2,fillColor:c,fillOpacity:1});}
 function setCur(cur,follow){
   if(!cur) return;
   if(!me){me=dot(cur,'${C.accent}',8).addTo(map);} else me.setLatLng(cur);
-  if(follow){ if(fitted) map.panTo(cur); else { map.setView(cur,16); fitted=true; } }
+  // the first fix: straight to the street (no map of the country first), later ones just pan
+  if(follow){ if(fitted) map.panTo(cur); else { map.setView(cur,16,{animate:false}); fitted=true; show(); } }
+}
+// a finished route draws itself over ~1.2 s like a replay (skipped for very long routes / many routes)
+function reveal(segs){
+  if(anim) cancelAnimationFrame(anim);
+  var total=0; segs.forEach(function(s){ total+=s.length; });
+  if(total>6000){ segs.forEach(function(s,i){ polys[i].setLatLngs(s); }); return; }
+  var t0=null;
+  function frame(ts){
+    if(t0==null) t0=ts;
+    var k=Math.min(1,(ts-t0)/1200); k=1-Math.pow(1-k,3);
+    segs.forEach(function(s,i){ polys[i].setLatLngs(s.slice(0,Math.max(1,Math.ceil(k*s.length)))); });
+    if(k<1) anim=requestAnimationFrame(frame); else anim=null;
+  }
+  anim=requestAnimationFrame(frame);
 }
 window.reset=function(d){
-  if(d.fitKey!=null && d.fitKey!==fitKey){ fitKey=d.fitKey; fitted=false; }
+  var refit=d.fitKey!=null && d.fitKey!==fitKey;
+  if(refit){ fitKey=d.fitKey; fitted=false; }
   lines.clearLayers();marks.clearLayers();polys=[];
   var all=[];
-  d.segs.forEach(function(s,i){ polys[i]=L.polyline(s,style).addTo(lines); all=all.concat(s); });
+  d.segs.forEach(function(s,i){ polys[i]=L.polyline(d.follow?s:[],style).addTo(lines); all=all.concat(s); });
   setCur(d.cur,d.follow);
-  if(!d.follow && all.length>1 && !fitted){ map.fitBounds(L.latLngBounds(all),{padding:[30,30]}); fitted=true; }
-  else if(!d.follow && all.length===1 && !fitted){ map.setView(all[0],15); fitted=true; }
+  if(!d.follow && all.length>1 && !fitted){ map.fitBounds(L.latLngBounds(all),{padding:[30,30],animate:false}); fitted=true; show(); }
+  else if(!d.follow && all.length===1 && !fitted){ map.setView(all[0],15,{animate:false}); fitted=true; show(); }
+  if(!d.follow){ if(all.length>1 && shown) reveal(d.segs); else d.segs.forEach(function(s,i){ polys[i].setLatLngs(s); }); }
 };
 window.append=function(d){
   d.segs.forEach(function(x){
@@ -70,9 +98,10 @@ window.append=function(d){
   setCur(d.cur,d.follow);
 };
 window.update=window.reset;
+post('ready');
 </script></body></html>`;
 
-function RouteMap({ segments, current, follow = false, style, interactive = true, paused = false, fitKey }: Props) {
+function RouteMap({ segments, current, follow = false, style, interactive = true, paused = false, fitKey, onTiles }: Props) {
   const { C } = useTheme();
   const ref = useRef<WebViewHandle>(null);
   const html = useMemo(() => buildHtml(C), [C]);
@@ -97,6 +126,13 @@ function RouteMap({ segments, current, follow = false, style, interactive = true
   const syncRef = useRef(sync);
   useEffect(() => { syncRef.current = sync; });
   const onLoadEnd = useCallback(() => { ready.current = true; syncRef.current(true); }, []);
+  const tilesRef = useRef(onTiles);
+  useEffect(() => { tilesRef.current = onTiles; });
+  const onMessage = useCallback((e: { nativeEvent: { data: string } }) => {
+    const m = e.nativeEvent.data;
+    if (m === 'tiles-offline') tilesRef.current?.('offline');
+    else if (m === 'tiles-online') tilesRef.current?.('online');
+  }, []);
   const webStyle = useMemo(() => ({ backgroundColor: C.bg }), [C.bg]);
 
   return (
@@ -109,6 +145,7 @@ function RouteMap({ segments, current, follow = false, style, interactive = true
         // links (e.g. the OSM attribution) open in the browser instead of replacing the map
         onShouldStartLoadWithRequest={onNavigate}
         onLoadEnd={onLoadEnd}
+        onMessage={onMessage}
         style={webStyle}
         scrollEnabled={false}
         javaScriptEnabled

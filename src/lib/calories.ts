@@ -34,7 +34,7 @@ export function metFor(sport: Sport, speedKmh: number): number {
 
 /** kcal ≈ MET × weight(kg) × hours */
 export function estimateCalories(sport: Sport, distanceM: number, movingSec: number, weightKg: number): number {
-  if (movingSec <= 0 || weightKg <= 0) return 0;
+  if (!Number.isFinite(distanceM) || !Number.isFinite(movingSec) || !Number.isFinite(weightKg) || movingSec <= 0 || weightKg <= 0) return 0;
   const speedKmh = (distanceM / movingSec) * 3.6;
   return Math.round(metFor(sport, speedKmh) * weightKg * (movingSec / 3600));
 }

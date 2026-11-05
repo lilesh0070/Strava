@@ -157,6 +157,13 @@ export function bestEffort(segments: Point[][], target: number): number | null {
   return Number.isFinite(best) ? best : null;
 }
 
+/** Largest finite value (no spread: an 8 h ride has tens of thousands of points). */
+export function maxOf(xs: (number | null | undefined)[]): number {
+  let m = -Infinity;
+  for (const x of xs) if (x != null && Number.isFinite(x) && x > m) m = x;
+  return m;
+}
+
 // ---------- formatting ----------
 
 export function fmtDuration(sec: number): string {

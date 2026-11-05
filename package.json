@@ -44,6 +44,7 @@
     "@types/react": "~19.3.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~58.0.4",
+    "leaflet": "^1.9.4",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -54,6 +55,10 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --import ./scripts/test-resolve.mjs --test src/lib/*.test.ts",
     "lint": "expo lint",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "test:tracker": "node --experimental-strip-types --import ./scripts/sim/loader.mjs --test scripts/sim/tracker.test.ts",
+    "sim:gps": "node --experimental-strip-types --import ./scripts/sim/loader.mjs scripts/sim/gps-sim.ts",
+    "sim:autopause": "node --experimental-strip-types --import ./scripts/sim/loader.mjs scripts/sim/autopause-sim.ts",
     "test:friends": "npx -y firebase-tools@15.35.0 emulators:exec --only auth,firestore --project demo-stride 'node --experimental-strip-types --import ./scripts/test-resolve.mjs --test scripts/friends-rules.test.ts'"
   },
   "private": true

@@ -34,7 +34,11 @@ export function parseBackup(text: string): BackupData & { activities: Activity[]
   const activities = data.activities
     .filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && Number.isFinite(a.startedAt))
     // a hand-edited or truncated file must not bring in NaN that every card would then print
-    .map((a) => ({ ...a, movingSec: num(a.movingSec), elapsedSec: num(a.elapsedSec), distanceM: num(a.distanceM), elevGainM: num(a.elevGainM) }));
+    .map((a) => ({
+      ...a, movingSec: num(a.movingSec), elapsedSec: num(a.elapsedSec), distanceM: num(a.distanceM), elevGainM: num(a.elevGainM),
+      // a point with a non-finite coordinate would put NaN into every distance and the GPX export
+      segments: a.segments.map((seg) => (Array.isArray(seg) ? seg.filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Number.isFinite(p.t)) : [])),
+    }));
   return { ...data, activities };
 }
 

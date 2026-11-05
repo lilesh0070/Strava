@@ -90,7 +90,7 @@ export default function FriendsScreen() {
 
       <NeuCard radius={28} style={{ gap: 12, alignItems: 'center' }}>
         <Text style={F.label}>{t('fr.yourId')}</Text>
-        <Text selectable style={{ color: C.accent, fontSize: 30, fontWeight: '900', letterSpacing: 3 }}>{st.code ?? '—'}</Text>
+        <Text selectable style={{ color: C.accentInk, fontSize: 30, fontWeight: '900', letterSpacing: 3 }}>{st.code ?? '—'}</Text>
         {st.code && (
           <NeuButton small icon="share-variant" label={t('fr.shareId')}
             onPress={() => shareApp(t, st.code).catch(() => undefined)} />

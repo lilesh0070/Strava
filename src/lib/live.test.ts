@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { haversine, type Point } from './geo.ts';
 import {
-  STOPPED_MS, distancePending, distanceStep, fixVelocity, gpsHealth, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, parsePace, rollingSpeed, settlePending, type KalmanState,
+  STOPPED_MS, creditedSpeed, distancePending, distanceStep, fixVelocity, gpsHealth, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, parsePace, rollingSpeed, settlePending, type KalmanState,
 } from './live.ts';
 
 const pt = (lat: number, lng: number, t: number, acc = 5): Point => ({ lat, lng, alt: null, acc, t });
@@ -177,17 +177,20 @@ test('distanceStep: standing still adds (almost) nothing, however long, and a re
   assert.ok(d > before + 80 && d < before + 95, `${(d - before).toFixed(1)} m for the 90 m after the stop`);
 });
 
-test('distanceStep: a slow hiker who dips under the stop threshold is not clipped', () => {
-  const ds = {};
-  let d = 0;
-  let kf: KalmanState | null = null;
-  for (let i = 0; i < 600; i++) {
-    const spd = 0.7 + noise(i) * 0.45; // 0.25-1.15 m/s: often under STOPPED_MS for a fix or two
-    const f = { ...pt(19 + (0.7 * i + noise(i + 11) * 3) / M, 72.8 + noise(i + 900) * 3 / M, i * 1000, 8), spd, hdg: 0.5 };
-    kf = kalmanStep(kf, f, 1);
-    if (!kf.outlier) d += distanceStep(ds, kf, f, 'hike').add;
+test('distanceStep: slow hikers who dip under the stop threshold are not clipped', () => {
+  for (const v of [0.5, 0.7]) {
+    const ds = {};
+    let d = 0;
+    let kf: KalmanState | null = null;
+    for (let i = 0; i < 600; i++) {
+      const spd = Math.max(0, v + noise(i) * 0.45); // ±0.45 m/s of Doppler noise: often under STOPPED_MS for a fix or two
+      const f = { ...pt(19 + (v * i + noise(i + 11) * 3) / M, 72.8 + noise(i + 900) * 3 / M, i * 1000, 8), spd, hdg: 0.5 };
+      kf = kalmanStep(kf, f, 1);
+      if (!kf.outlier) d += distanceStep(ds, kf, f, 'hike').add;
+    }
+    const truth = v * 599;
+    assert.ok(Math.abs(d - truth) / truth < 0.06, `${d.toFixed(0)} m for a ${truth.toFixed(0)} m hike at ${v} m/s`);
   }
-  assert.ok(Math.abs(d - 420) / 420 < 0.08, `${d.toFixed(0)} m for a 420 m hike`);
 });
 
 test('distanceStep: a GPS outage while moving credits the straight line; while stopped nothing', () => {
@@ -224,4 +227,21 @@ test('distanceStep without Doppler credits a steady walk within a few percent', 
   // the smoother's start-up lag costs a fixed ~20 m per segment (0.4 % of a 5 km walk)
   assert.ok(Math.abs(dist - 390) / 390 < 0.07, `with the pending rest: ${dist} m for 390 m`);
   assert.equal(distancePending(ds), 0);
+});
+
+test('creditedSpeed: Δdistance/Δtime over the window, null until there is enough of it', () => {
+  const samples = Array.from({ length: 61 }, (_, i) => ({ t: i * 1000, d: i * 1.3 })); // 1.3 m/s for 60 s
+  assert.ok(Math.abs(creditedSpeed(samples, 30)! - 1.3) < 1e-9);
+  assert.equal(creditedSpeed(samples.slice(0, 5), 30), null); // 4 s: too little
+  assert.equal(creditedSpeed([], 30), null);
+  // chunky credits (no-Doppler anchor path) still average out
+  const chunky = Array.from({ length: 61 }, (_, i) => ({ t: i * 1000, d: Math.floor(i / 5) * 6.5 }));
+  assert.ok(Math.abs(creditedSpeed(chunky, 30)! - 1.3) < 0.15, String(creditedSpeed(chunky, 30)));
+});
+
+test('laps never add up to more than the moving time once a lap mark is clamped', () => {
+  // a lap pressed while already standing (mark at 600 s) after auto-pause back-dated the pause to 590 s
+  const marks = [{ distanceM: 1000, movingSec: 600 }].map((l) => (l.movingSec > 590 ? { ...l, movingSec: 590 } : l));
+  const laps = lapsFromMarks(marks, 1000, 590);
+  assert.equal(laps.reduce((s, l) => s + l.durationSec, 0), 590);
 });

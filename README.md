@@ -50,6 +50,11 @@ Wellbeing guidance only, not medical advice.
 - **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service / iOS background location).
 - **Crash-safe sessions.** The current recording is saved to storage, so if the app is killed it picks up where it left off.
 - **GPS cleanup.** Drops low-accuracy fixes, stale cached fixes, standing-still jitter and multipath jumps.
+- **Live stats on the lock screen (Android).** While recording, a silent notification shows distance, time and pace, refreshed every few seconds (Settings → Recording to turn off).
+- **Auto-lap and targets.** Close a lap every N km automatically (voice summary), and get a one-time cue when you reach a distance or time target. The Record screen shows progress bars for the target and the weekly goal.
+- **Celebrations.** A new personal record or badge pops up as an animated card (with confetti) in your language, not a system dialog.
+- **Share my week.** The History header has a share button: a branded week card (7 day bars, km, time, best pace, steps, streak, friends rank) as an image, or a text block for WhatsApp. Early in the week it recaps last week.
+- **Works offline.** The map library is bundled, so the route and position dot draw with no internet; only the street tiles need data (a small pill says so).
 - **Steps.** Counted by the phone's hardware step counter during walks, runs and hikes (not while paused), with live steps and cadence. Older activities show an estimate from distance and speed, marked "≈".
 - **Your data is kept safe.**
   - Every activity, with all its GPS points, is stored as its own file.
@@ -68,7 +73,7 @@ Wellbeing guidance only, not medical advice.
 - **Streak and calendar.** A weekly activity streak plus a month calendar showing your active days.
 - **Profile.** An 8-week distance chart with a weekly goal, all-time totals, and running best efforts (1k / 5k / 10k / half).
 
-- **Settings (cog, top-right).** App updates, theme (Auto/Light/Dark), language, voice, auto-pause, start countdown, GPS accuracy, workday break reminders, and backup/restore.
+- **Settings (cog, top-right).** App updates, theme (Auto/Light/Dark), language, voice, auto-pause, auto-lap, targets, start countdown, GPS accuracy, lock-screen stats, workday break reminders, and backup/restore.
 - **In-app updates.** Any phone with internet finds a new GitHub release on its own:
   - It checks when the app opens and again when you come back to it (at most every 3 hours), or any time with **Settings → Check for updates**. A banner says when a new version is out, and **Update** downloads it with a progress bar and opens the Android installer. Your data is kept.
   - It reads a small `update.json` that every release ships, from GitHub's download CDN. That avoids the GitHub API's 60-requests-per-hour-per-IP limit, which a whole office on one Wi-Fi would hit. Older releases fall back to the API.
@@ -78,13 +83,19 @@ Wellbeing guidance only, not medical advice.
 - **Precise live tracking.**
   - Full GPS (best-for-navigation) every second with no distance filter, so the live position never goes stale, even when you stand still.
   - A constant-velocity Kalman filter fed with the GPS chip's Doppler speed and course: no zig-zag, no lag behind you, no corner cutting.
+  - Distance is credited for every filtered fix: on foot the filtered speed is integrated over time (position noise inflated walks by 3-6 %), rides use the filtered position, and phones whose chip reports no speed get a second, accuracy-aware smoother. A "still" state with hysteresis counts a stop as 0 m without clipping slow hikers; a GPS outage credits the straight line.
+  - Simulator results (`npm run sim:gps`: real tracker code, realistic noise, 14 routes incl. traffic-light stops, standing 10 min, slow hikes, a 400 m track, a 60 s outage): mean distance error ≈ 0.7 % (Android), 1.0 % (iPhone), 2.0 % (no Doppler); standing ten minutes adds ~3 m (was 281 m).
+  - Every stored point carries the recorded distance, so splits, best efforts, the pace chart and GPX agree with the headline number. Best efforts never span a pause.
+  - iPhones report "speed 0, course −1" when standing and Android "0/0" for a stop or for no speed at all; both conventions are handled, so a stop reads as a stop and a budget phone's walk is not pinned at zero.
   - Standing still adds no distance; a single multipath jump is rejected; Android's cached "last location" can't start a route in the wrong place.
-  - Pace now and max speed come from the filtered Doppler speed, so they react within a few seconds without spikes.
+  - Pace now and max speed come from the filtered Doppler speed (held steady unless it moves by 3 s/km); without Doppler the live pace is the recorded distance over the last 30 s.
+  - Auto-pause keeps the filter warm and resumes on three fast fixes or a real move of the smoothed position, so a multipath spike never flaps Resume/Pause; the first metres away from the stop count.
+  - Elevation gain comes from a smoothed altitude with an 8 m hysteresis; altitude the chip flags as poor (vertical accuracy > 30 m) is dropped.
   - The ±m accuracy chip re-checks every second and switches to "Finding GPS…" as soon as fixes stop.
   - Detects approximate-only permission or location turned off, and offers the fix (Android: in-app dialogs).
   - A watchdog restarts GPS if fixes stop arriving during a recording.
   - A GPS-quality gate before Start warns if the signal is weak.
-- **Live stats.** Pace now (rolling 30 s), average pace, the current lap, a lap button with voice summaries, and max speed.
+- **Live stats.** Pace now, average pace, the current lap, a lap button with voice summaries, and max speed.
 - **Pace coach.** Set a target like 5:30/km and get voice nudges when you drift ±15 s.
 - **Reliable background setup.** A shortcut to Android's battery-optimisation screen.
 - **Interval workouts.** Presets include run/walk, 6×400 m, 5×1 km, pyramid and tempo. Voice cues for every step and a live "x left" counter.
@@ -119,15 +130,15 @@ Wellbeing guidance only, not medical advice.
   - Exports are 1080 px wide. The classic summary card is still there.
   - **Direct Instagram stickers:** Instagram only accepts them from apps with a Facebook App ID. Create a free app at developers.facebook.com (no review needed), put its App ID in `app.json` → `expo.extra.facebookAppId`, and release a new version.
 - **Fast with a big history.** Lists use a light copy of each activity (simplified route + pre-computed best efforts). Full GPS points load only on the detail screen. Cards are memoised and the list is virtualised.
-- **हिन्दी.** The main screens and voice cues are available in Hindi (Settings → Language).
+- **हिन्दी.** The whole app and the voice cues are available in Hindi (Settings → Language); `npm run check:i18n` guards against new English-only strings.
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.
 - **TBDI FitTrack app icon** (adaptive, with a themed Android 13+ variant) and splash screen (light and dark).
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
-- **Friends & weekly leaderboard.** Every phone gets a friend ID (Settings → Friends). Enter a friend's ID to send a request; once they accept, you both see who covered the most km this week (also on the You tab). Friends only see your name and this week's km, never routes or locations. **Invite a friend** sends the app's download link together with your ID.
+- **Friends & leaderboard.** Every phone gets a friend ID (Settings → Friends). Enter a friend's ID to send a request; once they accept, you both see who covered the most km this week, this month or all-time (also on the You tab). Friends only see your name and your km totals, never routes or locations. **Invite a friend** sends the app's download link together with your ID.
 - **Share this app.** Settings → Share this app sends a link to the newest APK (from an iPhone: the release page with the APK and the .ipa).
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports only add what is missing: they never delete anything and never overwrite activities, gear or a profile already on the phone.
 
-Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and this week's km in Firebase).
+Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and your week/month/total km in Firebase).
 
 ## Releasing an update (all on GitHub)
 
@@ -218,7 +229,11 @@ src/app/                 Expo Router screens
   break.tsx              Guided desk stretch, box breathing, eye break
 src/components/          RouteMap (Leaflet WebView), RouteThumb (SVG), StoryOverlay, charts, Neu* UI kit
 src/lib/tracker.ts       Location task + recording state machine (steps, watchdog, voice cues)
-src/lib/live.ts          Kalman filter, rolling pace, laps, pace coach, GPS health (unit-tested)
+src/lib/live.ts          Kalman filter, distance stage (still state, gaps, no-Doppler smoother), laps, pace coach (unit-tested)
+src/lib/liveNotification.ts  Android lock-screen stats notification; liveText.ts builds its text (unit-tested)
+src/lib/weekRecap.ts     "Share my week" numbers (unit-tested); components/WeekRecapCard.tsx draws the card
+src/lib/celebrate.ts     PR / badge celebration store; components/CelebrationOverlay.tsx shows it
+src/lib/leafletSrc.ts    Leaflet JS+CSS inlined into the map page (generated by scripts/vendor-leaflet.mjs)
 src/lib/geo.ts           Distance, splits, elevation, best-effort maths (unit-tested)
 src/lib/coach.ts         Voice cues, auto-pause rules, GPX, week keys and streaks (unit-tested)
 src/lib/storage.ts       Activities, summaries, gear, profile, settings (writes are serialised)
@@ -250,8 +265,13 @@ doesn't have, so test on a development build or an APK from a release).
 
 Before every pull request:
 
-- `npm run typecheck`, `npm run lint` and `npm test` must pass (the release workflow runs the tests and
-  the typecheck too and stops on a failure).
+- `npm run typecheck`, `npm run lint`, `npm test` and `npm run check:i18n` must pass (the release workflow
+  runs the tests and the typecheck too and stops on a failure). Every user-facing string goes through
+  `t('key')` with an English and a Hindi value in `src/lib/strings.ts`.
+- If you touched `src/lib/tracker.ts` or `src/lib/live.ts`: `npm run test:tracker` (the recording engine
+  end to end under Node) and `npm run sim:gps` (distance error of the real tracker over synthetic routes
+  for Android, iPhone and no-Doppler phones; keep the means near 0.7 / 1.0 / 2.0 % and the 10-minute
+  standing creep under 10 m). `npm run sim:autopause` checks auto-pause/resume behaviour.
 - If you touched `src/lib/friends.ts`, `src/lib/firebase.ts` or `firestore.rules`: `npm run test:friends`
   (needs Java; downloads the Firebase emulators the first time).
 - Add native libraries with `npx expo install <package>` so the version matches Expo SDK 58. A new
@@ -279,7 +299,11 @@ Known gaps (good next steps):
 - `npm run typecheck`
 - `npm run lint`: ESLint via `expo lint`
 - `npm run test:friends`: friends + Firestore rules against the Firebase emulators
+- `npm run test:tracker`: the recording engine end to end (stubbed native modules, injected GPS fixes)
+- `npm run sim:gps [android|ios|nodop] [seeds]`: distance accuracy simulator; `npm run sim:autopause`
+- `npm run check:i18n`: fails on English-only UI strings
+- `node scripts/vendor-leaflet.mjs`: refresh the inlined Leaflet after bumping the devDependency
 
 ## Roadmap ideas
 
-Kudos and comments, segments, GPX import, heart-rate sensors over BLE.
+Kudos and comments, ghost pace (race your best on a route), training load / rest-day advice, back-to-start navigation, GPX import and CSV export, a fitness score with a race predictor, segments, heart-rate sensors over BLE, barometer-based elevation.

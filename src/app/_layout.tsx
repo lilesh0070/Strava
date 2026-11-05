@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import CrashScreen from '../components/CrashScreen';
 import { ensureReminders } from '../lib/reminders';
 import ToastHost from '../components/ToastHost';
+import CelebrationOverlay from '../components/CelebrationOverlay';
 import UpdateBanner from '../components/UpdateBanner';
 import { I18nProvider, useT } from '../lib/i18n';
 import { ThemeProvider, useTheme } from '../lib/theme';
@@ -71,6 +72,7 @@ function Root() {
       </Stack>
       <UpdateBanner />
       <ToastHost />
+      <CelebrationOverlay />
     </>
   );
 }

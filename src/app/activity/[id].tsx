@@ -9,7 +9,7 @@ import ElevationChart from '../../components/ElevationChart';
 import RouteMap from '../../components/RouteMap';
 import RouteThumb from '../../components/RouteThumb';
 import Stat from '../../components/Stat';
-import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, smoothAltitude, splits } from '../../lib/geo';
+import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, maxOf, smoothAltitude, splits } from '../../lib/geo';
 import { estimateCalories } from '../../lib/calories';
 import { activitySteps, cadence, fmtSteps } from '../../lib/steps';
 import PaceChart from '../../components/PaceChart';
@@ -19,7 +19,7 @@ import { useTheme } from '../../lib/theme';
 import { showToast } from '../../lib/toast';
 import { IconWell, NeuCard, NeuIconButton } from '../../components/Neu';
 import { sportInfo, type Activity } from '../../lib/types';
-import { useT } from '../../lib/i18n';
+import { prLabel, useT } from '../../lib/i18n';
 
 export default function ActivityDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,7 +56,7 @@ export default function ActivityDetail() {
   const fullKms = splitRows.filter((s) => s.distanceM >= 1000);
   const bestPerKm = Math.min(...(fullKms.length ? fullKms : splitRows).map((s) => s.durationSec * (1000 / s.distanceM)));
   // the same smoothed altitude as the chart and the elevation gain: one noisy fix is not the summit
-  const maxAlt = loaded && a ? Math.max(...a.segments.flatMap((seg) => smoothAltitude(seg)).filter((x): x is number => x != null), -Infinity) : NaN;
+  const maxAlt = loaded && a ? maxOf(a.segments.flatMap((seg) => smoothAltitude(seg))) : NaN;
 
   const saveFailed = (e: unknown) => Alert.alert(t('act.couldNotSave'), String((e as Error)?.message ?? e));
   const saveName = async () => {
@@ -74,7 +74,7 @@ export default function ActivityDetail() {
   // story sticker / photo story / classic card all live on the share screen
   const onShare = () => router.push(`/share/${a.id}`);
 
-  const onExport = () => shareGpx(a).catch((e) => Alert.alert('Export failed', String(e?.message ?? e)));
+  const onExport = () => shareGpx(a).catch((e) => Alert.alert(t('act.exportFailed'), String(e?.message ?? e)));
 
   const onDelete = () => Alert.alert(t('act.deleteQ'), undefined, [
     { text: t('act.cancel'), style: 'cancel' },
@@ -131,7 +131,7 @@ export default function ActivityDetail() {
               {prs.map((r) => (
                 <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7,
                   borderRadius: 999, backgroundColor: C.accent, boxShadow: S.glow }}>
-                  <Text style={{ color: C.accentText, fontWeight: '800', fontSize: 12 }}>🏆 {r.label} · {fmtDuration(r.value)}</Text>
+                  <Text style={{ color: C.accentText, fontWeight: '800', fontSize: 12 }}>🏆 {prLabel(t, r)} · {fmtDuration(r.value)}</Text>
                 </View>
               ))}
             </View>
@@ -227,7 +227,7 @@ export default function ActivityDetail() {
                       {info.usesPace ? fmtPace(s.distanceM, s.durationSec) : fmtSpeed(s.distanceM, s.durationSec)}
                     </Text>
                     <View style={{ flex: 1, height: 14, borderRadius: 7, backgroundColor: C.bg, boxShadow: S.insetSm, padding: 3 }}>
-                      <View style={{ height: 8, borderRadius: 4, width: `${Math.max(8, (bestPerKm / perKm) * 100)}%`,
+                      <View style={{ height: 8, borderRadius: 4, width: `${Math.min(100, Math.max(8, (bestPerKm / perKm) * 100))}%`,
                         backgroundColor: isBest ? C.accent : C.faint }} />
                     </View>
                   </View>

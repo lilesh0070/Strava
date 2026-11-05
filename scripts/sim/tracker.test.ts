@@ -1,0 +1,182 @@
+// End-to-end tests of the recording engine (src/lib/tracker.ts) under Node with stubbed native modules:
+// fixes are injected, the clock is faked. Run with `npm run test:tracker`.
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import AS, { __store } from './stubs/async-storage.mjs';
+import { __files } from './stubs/fs.mjs';
+import { __w } from './stubs/location.mjs';
+import { __said } from './stubs/misc.mjs';
+
+let clock = 1_800_000_000_000;
+Date.now = () => clock;
+await AS.setItem('stride:settings', JSON.stringify({ autoPause: true, voiceCues: true }));
+const tracker = await import('../../src/lib/tracker.ts');
+const storage = await import('../../src/lib/storage.ts');
+const backup = await import('../../src/lib/backup.ts');
+const { sessionMovingSec } = await import('../../src/lib/types.ts');
+await new Promise((r) => setTimeout(r, 20));
+
+let lat = 28.6, lng = 77.2;
+const fix = (acc = 5, moveM = 4) => {
+  lat += moveM / 111_320;
+  return { coords: { latitude: lat, longitude: lng, altitude: null, accuracy: acc, speed: moveM, heading: 0 }, timestamp: clock };
+};
+const run = async (sec: number, acc = 5, moveM = 4) => { for (let i = 0; i < sec; i++) { clock += 1000; await tracker.ingest([fix(acc, moveM) as never]); } };
+
+test('manual pause then resume: no instant auto-pause, pause not counted twice', async () => {
+  await tracker.start('run');
+  await run(600);
+  const before = tracker.getSession()!.distanceM!;
+  assert.ok(before > 1500, `distance ${before}`);
+  await tracker.pause();
+  clock += 600_000;
+  await tracker.resume();
+  await run(1, 60, 0); // first fix after resume is poor and rejected
+  const s = tracker.getSession()!;
+  assert.equal(s.status, 'recording');
+  assert.ok(Math.abs(sessionMovingSec(s, clock) - 601) < 3, `moving ${sessionMovingSec(s, clock)}`);
+  await run(13, 5, 0); // really standing still → auto-pause, measured from the resume
+  assert.equal(tracker.getSession()!.status, 'paused');
+  assert.ok(sessionMovingSec(tracker.getSession()!, clock) >= 598, `moving ${sessionMovingSec(tracker.getSession()!, clock)}`);
+  await tracker.discard();
+});
+
+test('a failed save keeps the recording; the retry saves one activity', async () => {
+  await tracker.start('run');
+  await run(60);
+  await tracker.pause();
+  const id = tracker.getSession()!.activityId;
+  (globalThis as { __fsFail?: boolean }).__fsFail = true;
+  await assert.rejects(tracker.finish());
+  assert.ok(tracker.getSession(), 'session kept');
+  (globalThis as { __fsFail?: boolean }).__fsFail = false;
+  const a = await tracker.finish();
+  assert.equal(a!.id, id);
+  assert.equal(tracker.getSession(), null);
+  const ids: string[] = JSON.parse(__store.get('stride:activities'));
+  assert.equal(ids.filter((x) => x === id).length, 1);
+});
+
+test('double tap on Start creates one GPS watcher, and finish removes it', async () => {
+  const before = { c: __w.created, r: __w.removed };
+  await Promise.all([tracker.start('run'), tracker.start('run')]);
+  assert.equal(__w.created - before.c, 1);
+  await tracker.discard();
+  assert.equal(__w.removed - before.r, 1);
+});
+
+test('time-based workout step finishes during a standing (auto-paused) rest', async () => {
+  __said.length = 0;
+  await tracker.start('run', 'beginner'); // 5 min warm-up first
+  await run(100);
+  await run(220, 5, 0); // stand still: auto-pauses, fixes keep arriving
+  assert.equal(tracker.getSession()!.status, 'paused');
+  assert.equal(tracker.getSession()!.workout!.index, 1, 'warm-up done while standing');
+  assert.ok(__said.some((t) => /Interval 1 of 8/.test(t)), __said.join(' | '));
+  await tracker.discard();
+});
+
+test('session survives an app restart (file storage)', async () => {
+  await tracker.start('ride');
+  await run(120, 5, 8);
+  await tracker.pause();
+  const pts = tracker.getSession()!.segments.flat().length;
+  const fresh = await import('../../src/lib/tracker.ts?restart=1');
+  await fresh.restore();
+  assert.equal(fresh.getSession()!.segments.flat().length, pts);
+  await fresh.discard();
+  await tracker.discard(); // the first instance still holds it in memory
+});
+
+test('a corrupt saved session does not block recording', async () => {
+  __files.set('/doc/tbdi-data/session.json', '{"broken');
+  const fresh = await import('../../src/lib/tracker.ts?restart=2');
+  await fresh.restore();
+  assert.equal(fresh.getSession(), null);
+  await fresh.start('walk');
+  assert.ok(fresh.getSession());
+  await fresh.discard();
+});
+
+test('a fresh accurate fix right before Start does become the first point', async () => {
+  await tracker.ingest([fix(5, 0) as never]);
+  await tracker.start('run');
+  assert.equal(tracker.getSession()!.segments[0].length, 1);
+  await tracker.discard();
+});
+
+const act = (id: string, t: number, name = id) => ({ id, name, sport: 'run', startedAt: t, movingSec: 60, elapsedSec: 60, distanceM: 1000, elevGainM: 0,
+  segments: [[{ lat: 1, lng: 1, alt: null, acc: 5, t }, { lat: 1.001, lng: 1, alt: null, acc: 5, t: t + 60000 }]] });
+
+test('restore adds only new activities, never overwrites local edits, keeps a concurrent save', async () => {
+  await storage.saveActivity(act('a', 1000, 'Marathon PB') as never);
+  const doc = JSON.stringify({ format: 'stride-backup', version: 1, activities: [act('a', 1000, 'old name'), ...Array.from({ length: 25 }, (_, i) => act(`r${i}`, 5000 + i))] });
+  const [added] = await Promise.all([backup.applyBackup(doc, { includeSettings: false }), storage.saveActivity(act('new', 9999) as never)]);
+  assert.equal(added, 25);
+  const ids: string[] = JSON.parse(__store.get('stride:activities'));
+  assert.ok(ids.includes('new'));
+  assert.equal((await storage.getActivity('a'))!.name, 'Marathon PB');
+  assert.equal((await storage.listActivities()).filter((x) => /^r\d+$/.test(x.id)).length, 25);
+});
+
+test('restore fills profile fields still at defaults, keeps the onboarding name', async () => {
+  await AS.setItem('stride:profile', JSON.stringify({ name: 'Ravi', weeklyGoalKm: 20, weightKg: 70, monthlyGoalKm: 80, team: '' }));
+  await backup.applyBackup(JSON.stringify({ format: 'stride-backup', version: 1, activities: [],
+    profile: { name: 'Old', weeklyGoalKm: 35, weightKg: 62.5, monthlyGoalKm: 150, team: 'Plant 2' } }), { includeSettings: false });
+  assert.deepEqual(await storage.getProfile(), { name: 'Ravi', weeklyGoalKm: 35, weightKg: 62.5, monthlyGoalKm: 150, team: 'Plant 2' });
+});
+
+test('backups report an unreadable activity; it can still be deleted', async () => {
+  __files.set('/doc/tbdi-data/activity-r3.json', '{oops');
+  const b = await backup.buildBackup();
+  assert.deepEqual(b.unreadable, ['r3']);
+  await storage.deleteActivity('r3');
+  assert.ok(!JSON.parse(__store.get('stride:activities')).includes('r3'));
+});
+
+test('an old cached fix delivered just before Start is not used as the first point', async () => {
+  // GPS hands over a 3-hour-old cached position; the recording starts a moment later
+  await tracker.ingest([{ coords: { latitude: 10, longitude: 10, altitude: null, accuracy: 5, speed: 0, heading: 0 }, timestamp: clock - 3 * 3600_000 } as never]);
+  await tracker.start('run');
+  assert.equal(tracker.getSession()!.segments[0].length, 0);
+  await tracker.discard();
+});
+
+test('live notification: posted while recording, paused title, cleared on finish', async () => {
+  const { __notes, __dismissed } = await import('./stubs/notifications.mjs');
+  const n0 = __notes.length;
+  await tracker.start('run');
+  await run(30);
+  assert.ok(__notes.length > n0, 'posted a live notification');
+  const last = () => __notes[__notes.length - 1];
+  assert.equal(last().identifier, 'live-stats');
+  assert.match(last().content.title, /^Recording · Run/);
+  assert.match(last().content.body, /km · 0:\d\d · /);
+  assert.equal(last().content.sticky, true);
+  await tracker.pause();
+  assert.match(last().content.title, /^Paused/);
+  await tracker.resume();
+  assert.match(last().content.title, /^Recording/);
+  const d0 = (await import('./stubs/notifications.mjs')).__dismissed;
+  await tracker.finish();
+  assert.equal((await import('./stubs/notifications.mjs')).__dismissed, d0 + 1, 'dismissed on finish');
+  void __dismissed;
+});
+
+test('saved activity: splits, chord total and best efforts agree with the headline distance', async () => {
+  const geo = await import('../../src/lib/geo.ts');
+  await tracker.start('run');
+  await run(900, 5, 3.2); // ~2.9 km at 3.2 m/s
+  await tracker.pause();
+  clock += 120_000;
+  await tracker.resume();
+  await run(400, 5, 3.2);
+  const a = (await tracker.finish())!;
+  const sp = geo.splits(a.segments);
+  const splitTotal = sp.reduce((s, x) => s + x.distanceM, 0);
+  assert.ok(Math.abs(splitTotal - a.distanceM) <= 5, `splits ${splitTotal} vs headline ${a.distanceM}`);
+  assert.ok(Math.abs(geo.totalDistance(a.segments) - a.distanceM) <= 5, `chords ${geo.totalDistance(a.segments)} vs ${a.distanceM}`);
+  assert.ok(a.segments.every((seg) => seg.every((p) => typeof p.d === 'number')), 'every point carries the recorded distance');
+  const km = geo.bestEffort(a.segments, 1000)!;
+  assert.ok(km > 290 && km < 340, `fastest km ${km} s at 3.2 m/s`);
+});

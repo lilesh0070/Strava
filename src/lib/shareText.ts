@@ -2,9 +2,10 @@
 // (Aa → paste), WhatsApp or a caption. Plain text can't carry colour, so the route is drawn with
 // Braille dot characters (each one is a 2 × 4 grid of dots); colour the text orange in Instagram and
 // it matches the app's route line. Pure (no React Native) so it is unit-tested.
-import type { Point } from './geo';
+import { fmtDuration, fmtKm, type Point } from './geo';
 import { statValue, type ShareStatKey } from './shareStats';
 import type { Activity, Sport } from './types';
+import type { WeekRecap } from './weekRecap';
 
 const BRAILLE_BLANK = 0x2800;
 /** Bit for the dot at (x, y) inside one Braille cell (x 0..1, y 0..3). */
@@ -93,4 +94,26 @@ export function activityText(a: Activity, o: ActivityTextOptions): string {
   if (route) parts.push('', route);
   parts.push('', `— ${o.appName ?? 'TBDI FitTrack'}`);
   return parts.join('\n');
+}
+
+// ---------- "my week" ----------
+export type WeekTextOptions = {
+  title: string;
+  dateText: string;
+  labels: { activities: string; best: string; steps: string; streak: string; vsLast: string; rank: string };
+  rank?: number | null;
+  appName?: string;
+};
+
+/** The week as one block of text for a group chat. */
+export function weekText(r: WeekRecap, o: WeekTextOptions): string {
+  const line2 = `📏 ${fmtKm(r.km * 1000)} km · ${r.count} ${o.labels.activities} · ⏱️ ${fmtDuration(r.sec)}`;
+  const extras: string[] = [];
+  if (r.bestPaceSec != null) extras.push(`⚡ ${o.labels.best} ${fmtDuration(r.bestPaceSec)} /km`);
+  if (r.steps > 0) extras.push(`👣 ${r.steps.toLocaleString('en-IN')} ${o.labels.steps}`);
+  const tail: string[] = [];
+  if (r.changePct != null) tail.push(`${r.changePct >= 0 ? '▲' : '▼'} ${Math.abs(r.changePct)}% ${o.labels.vsLast}`);
+  if (r.streak > 1) tail.push(`🔥 ${r.streak} ${o.labels.streak}`);
+  if (o.rank != null) tail.push(`${o.rank === 1 ? '🥇' : o.rank === 2 ? '🥈' : o.rank === 3 ? '🥉' : '🏅'} #${o.rank} ${o.labels.rank}`);
+  return [`🏃 ${o.title} · ${o.dateText}`, line2, ...(extras.length ? [extras.join(' · ')] : []), ...(tail.length ? [tail.join(' · ')] : []), `— ${o.appName ?? 'TBDI FitTrack'}`].join('\n');
 }

@@ -17,7 +17,7 @@ import { AUTO_PAUSE_AFTER_MS, AUTO_RESUME_DIST_M, kmCue } from './coach';
 import { acceptPoint, elevationGain, haversine, totalDistance, type Point } from './geo';
 import { advance, findWorkout, startProgress, stepCue } from './workouts';
 import { clearLiveNotification, clearStaleLiveNotification, ensureLiveNotificationPermission, updateLiveNotification } from './liveNotification';
-import { MOVING_MS, STOPPED_MS, distanceStep, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, processNoise, settlePending, type GpsFix, type KalmanState } from './live';
+import { MOVING_MS, STOPPED_MS, creditedSpeed as creditedSpeedOf, distanceStep, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, processNoise, settlePending, type CreditSample, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
 import { kmCueHi, speechLanguage, voicePhrases } from './strings';
 import { readBlob, removeBlob, writeBlob } from './blobStore';
@@ -180,16 +180,20 @@ export function ingest(locations: Location.LocationObject[]) {
           if (!kf.outlier) {
             const sm = toPoint({ ...f, lat: kf.lat, lng: kf.lng });
             lastFix = sm;
-            s.moveN = Math.hypot(kf.ve, kf.vn) >= (isOnFoot(s.sport) && s.sport !== 'run' ? MOVING_MS : 1.0) ? (s.moveN ?? 0) + 1 : 0;
+            // without Doppler the filtered speed is position noise, so only a clear move away counts
+            const dop = hasDoppler(kf, f.t);
+            s.moveN = dop && Math.hypot(kf.ve, kf.vn) >= (isOnFoot(s.sport) && s.sport !== 'run' ? MOVING_MS : 1.0) ? (s.moveN ?? 0) + 1 : 0;
             const hop = haversine(last, sm);
-            if (s.moveN >= 3 || (accOk(f, 25) && hop >= Math.max(AUTO_RESUME_DIST_M, 1.5 * (f.acc ?? 10)))) {
+            const hopNeeded = dop ? Math.max(AUTO_RESUME_DIST_M, 1.5 * (f.acc ?? 10)) : Math.max(20, 2.5 * (f.acc ?? 10));
+            s.hopN = accOk(f, 25) && hop >= hopNeeded ? (s.hopN ?? 0) + 1 : 0; // a 1-3 fix spike burst is not a move
+            if (s.moveN >= 3 || s.hopN >= 3 || (s.hopN >= 1 && accOk(f, 15))) {
               const pausedFor = Math.max(0, sm.t - (s.pauseStartedAt ?? sm.t));
               s.pausedMs += pausedFor;
               s.autoPausedMs = (s.autoPausedMs ?? 0) + pausedFor;
               s.pauseStartedAt = null;
               s.status = 'recording';
               s.autoPaused = false;
-              s.moveN = 0;
+              s.moveN = 0; s.hopN = 0;
               s.distanceM = (s.distanceM ?? 0) + hop; // the first metres away from the stop point
               s.segments.push([{ ...sm, d: r(s.distanceM, 1) }]);
               s.segStartedAt = sm.t;
@@ -222,13 +226,13 @@ export function ingest(locations: Location.LocationObject[]) {
           const settled = kf.n >= 3 || accOk(f, 15);
           if (!res.still && settled && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12, 3)) {
             seg.push({ ...q, d: r(s.distanceM ?? 0, 1) });
-          } else if (settings.autoPause && (s.distanceM ?? 0) > 0) {
+          } else if (settings.autoPause && s.sport !== 'hike' && (s.distanceM ?? 0) > 0) {
             // Idle since the last kept point, or since this segment began. Never measured from a point
-            // before the last resume, or a manual pause would be subtracted a second time.
+            // before the last resume, or a manual pause would be subtracted a second time. (Not for hikes:
+            // a 0.5 m/s scramble over rocks looks like standing still to GPS and would pause every minute.)
             const kept = seg[seg.length - 1];
             const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : p.t);
-            const wait = AUTO_PAUSE_AFTER_MS * (s.sport === 'hike' ? 2 : 1); // hikers stop to look around
-            if (p.t - idleSince >= wait) {
+            if (p.t - idleSince >= AUTO_PAUSE_AFTER_MS) {
               settleDistance(s);
               s.status = 'paused';
               s.autoPaused = true;
@@ -272,24 +276,20 @@ async function liveStats(force = false) {
 /** Credit the distance a chord path still holds back; called when a segment ends. */
 function settleDistance(s: Session) {
   const rest = settlePending(s.ds);
-  if (rest > 0) s.distanceM = (s.distanceM ?? 0) + rest;
+  if (rest > 0) {
+    s.distanceM = (s.distanceM ?? 0) + rest;
+    const seg = s.segments[s.segments.length - 1], last = seg[seg.length - 1];
+    if (last?.d != null) last.d = r(s.distanceM, 1); // splits/charts read d: keep them equal to the headline
+  }
 }
 
 // ---------- live speed from the recorded distance ----------
 // (time, distance) samples for every filtered fix of the current segment. The live pace on phones without
 // Doppler and the pace coach read Δdistance/Δtime from here, so they agree with the headline distance
 // instead of re-measuring the noisy stored points (which read 20-40 % too fast).
-const cred: { t: number; d: number }[] = [];
+const cred: CreditSample[] = [];
 const CRED_KEEP_MS = 120_000;
-function creditedSpeed(windowSec: number): number | null {
-  const last = cred[cred.length - 1];
-  if (!last) return null;
-  let i = cred.length - 1;
-  while (i > 0 && last.t - cred[i - 1].t <= windowSec * 1000) i--;
-  const span = (last.t - cred[i].t) / 1000;
-  if (span < Math.min(10, windowSec / 2)) return null;
-  return (last.d - cred[i].d) / span;
-}
+const creditedSpeed = (windowSec: number) => creditedSpeedOf(cred, windowSec);
 
 function coachPace(s: Session, now: number) {
   const target = settings.targetPaceSec;
@@ -345,12 +345,19 @@ export function currentSpeed(): number | null {
  */
 let shownSpeed: number | null = null;
 let shownAt = 0;
+let smoothSpeed: number | null = null;
+let smoothAt = 0;
 export function steadySpeed(): number | null {
   const v = currentSpeed();
   const now = Date.now();
-  if (v == null || shownSpeed == null || now - shownAt >= 5_000
-    || Math.abs(1000 / v - 1000 / shownSpeed) > 3 || Math.abs(v - shownSpeed) > 0.3 / 3.6) {
-    shownSpeed = v; shownAt = now;
+  if (v == null) { shownSpeed = null; smoothSpeed = null; return null; }
+  // a 5 s average first (the filter's own 3 s one is kept for the stop/start logic), then the deadband
+  smoothSpeed = smoothSpeed == null || now - smoothAt > 10_000 ? v : smoothSpeed + (1 - Math.exp(-(now - smoothAt) / 5000)) * (v - smoothSpeed);
+  smoothAt = now;
+  const sv = smoothSpeed;
+  if (shownSpeed == null || now - shownAt >= 5_000
+    || (now - shownAt >= 3_000 && (Math.abs(1000 / sv - 1000 / shownSpeed) > 3 || Math.abs(sv - shownSpeed) > 0.3 / 3.6))) {
+    shownSpeed = sv; shownAt = now;
   }
   return shownSpeed;
 }
@@ -480,6 +487,15 @@ async function isTracking() {
 }
 
 export type PermissionResult = 'background' | 'foreground' | 'denied';
+
+/** Where location permission stands, without showing a dialog (the Record tab asks in-app first). */
+export async function permissionStatus(): Promise<'granted' | 'undetermined' | 'denied'> {
+  try {
+    const p = await Location.getForegroundPermissionsAsync();
+    if (p.granted) return 'granted';
+    return p.status === 'undetermined' || p.canAskAgain ? 'undetermined' : 'denied';
+  } catch { return 'undetermined'; }
+}
 export type Precision = 'precise' | 'approximate' | 'off';
 
 /** Whether the OS will hand over GNSS-grade fixes: location on, and precise (not approximate) access. */
@@ -694,7 +710,7 @@ export function resume() {
     session.status = 'recording';
     session.autoPaused = false;
     session.ds = undefined; // the filter keeps its state (it resets itself after a long gap)
-    session.moveN = 0;
+    session.moveN = 0; session.hopN = 0;
     cred.length = 0;
     session.segments.push([]);
     session.segStartedAt = now;
@@ -759,7 +775,7 @@ export async function finish(): Promise<Activity | null> {
     const distanceM = Math.round(s.distanceM != null && s.distanceM > 0 ? s.distanceM : totalDistance(segments));
     const a: Activity = {
       id: (s.activityId ??= newActivityId(s.startedAt)), // stable across retries: a retried save overwrites
-      name: defaultName(s.sport, s.startedAt),
+      name: defaultName(s.sport, s.startedAt, settings.language),
       sport: s.sport,
       startedAt: s.startedAt,
       movingSec,
