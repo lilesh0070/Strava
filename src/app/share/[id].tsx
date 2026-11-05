@@ -1,5 +1,6 @@
-// Share an activity, Strava-style: swipe through styles (the first is a transparent sticker with the clean
-// orange route and key stats), then send it to an Instagram story, copy it, save it, or share anywhere.
+// Share an activity, Strava-style: swipe through styles (first the route on a real map with the numbers, then
+// the same in the app's own look, a transparent sticker, your photo, plain colours), then send it to an
+// Instagram story, copy it, save it, or share anywhere.
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import Constants from 'expo-constants';
@@ -18,6 +19,7 @@ import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
 import { InstagramStory } from '../../../modules/instagram-story';
 import { NeuButton, NeuCard, NeuSegmented } from '../../components/Neu';
+import MapShareCard from '../../components/MapShareCard';
 import ShareCard, { type ShareCardHandle } from '../../components/ShareCard';
 import StoryOverlay, { type OverlayTone } from '../../components/StoryOverlay';
 import { useT } from '../../lib/i18n';
@@ -33,14 +35,17 @@ import type { Activity } from '../../lib/types';
 const EXPORT_W = 1080 / PixelRatio.get();
 const EXPORT_H = (EXPORT_W * 16) / 9;
 const SIZES = { s: 0.6, m: 0.78, l: 0.95 } as const;
-type Template = { key: 'clear' | 'photo' | 'dark' | 'orange'; label: Key; bg: string | null };
+type Template = { key: 'map' | 'card' | 'clear' | 'photo' | 'dark' | 'orange'; label: Key; bg: string | null };
 const TEMPLATES: Template[] = [
-  { key: 'clear', label: 'sh.tplClear', bg: null }, // transparent sticker, first like Strava's
+  { key: 'map', label: 'sh.tplMap', bg: '#111318' }, // the route on a street map, numbers on a dark fade
+  { key: 'card', label: 'sh.tplCard', bg: null }, // the same in the app's own look
+  { key: 'clear', label: 'sh.tplClear', bg: null }, // transparent sticker for an Instagram photo / video
   { key: 'photo', label: 'sh.tplPhoto', bg: '#111318' },
   { key: 'dark', label: 'sh.tplDark', bg: '#111318' },
   { key: 'orange', label: 'sh.tplOrange', bg: '#F2762E' },
 ];
-type Shot = 'sticker' | 'story' | 'card';
+type Shot = 'sticker' | 'story' | 'card' | 'mapcard';
+const isMapTpl = (k: Template['key']): k is 'map' | 'card' => k === 'map' || k === 'card';
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 /** Facebook App ID for Instagram's direct "add sticker to story" (app.json → expo.extra.facebookAppId). */
 const facebookAppId = () => String((Constants.expoConfig?.extra as { facebookAppId?: string } | undefined)?.facebookAppId ?? '').trim();
@@ -92,6 +97,7 @@ export default function ShareActivity() {
   const stickerRef = useRef<ShareCardHandle>(null);
   const storyRef = useRef<ShareCardHandle>(null);
   const cardRef = useRef<ShareCardHandle>(null);
+  const mapRef = useRef<ShareCardHandle>(null);
 
   useEffect(() => {
     getActivity(id).then((x) => {
@@ -139,15 +145,15 @@ export default function ShareActivity() {
       new Promise((r) => setTimeout(r, 4000)),
     ]);
     await new Promise((r) => setTimeout(r, 120)); // let SVG and images paint
-    const ref = kind === 'sticker' ? stickerRef : kind === 'card' ? cardRef : storyRef;
-    const png = kind !== 'story';
+    const ref = kind === 'sticker' ? stickerRef : kind === 'card' ? cardRef : kind === 'mapcard' ? mapRef : storyRef;
+    const png = kind === 'sticker' || kind === 'card'; // a story or map image has no transparency: JPEG is far smaller
     try {
       return await captureRef(ref as unknown as Parameters<typeof captureRef>[0],
         { format: png ? 'png' : 'jpg', quality: png ? 1 : 0.92, result });
     } finally { setShot(null); }
   };
   const ready = () => { const r = shotReady.current; shotReady.current = null; r?.(); };
-  const mainShot: Shot = isSticker ? 'sticker' : 'story';
+  const mainShot: Shot = isSticker ? 'sticker' : isMapTpl(tpl.key) ? 'mapcard' : 'story';
 
   const run = async (fn: () => Promise<void>) => {
     if (busy) return;
@@ -161,14 +167,14 @@ export default function ShareActivity() {
     await MediaLibrary.Asset.create(uri);
   };
   const shareSheet = async (uri: string, kind: Shot) =>
-    Sharing.shareAsync(uri, { mimeType: kind === 'story' ? 'image/jpeg' : 'image/png', dialogTitle: t('sh.share') });
+    Sharing.shareAsync(uri, { mimeType: kind === 'story' || kind === 'mapcard' ? 'image/jpeg' : 'image/png', dialogTitle: t('sh.share') });
 
   /** Strava-style: the sticker lands in Instagram's story editor; without a Facebook App ID we save it and open Instagram. */
   const toInstagram = () => run(async () => {
     const uri = await capture(mainShot);
     if (!isSticker) { // a full story image: Instagram offers "Stories" in the share sheet
       showToast(t('sh.pickStories'), undefined, 4000);
-      await shareSheet(uri, 'story');
+      await shareSheet(uri, mainShot);
       return;
     }
     const appId = facebookAppId();
@@ -238,8 +244,10 @@ export default function ShareActivity() {
     return (
       <View style={{ width, alignItems: 'center' }}>
         <View style={{ width: PW, height: PH, borderRadius: 24, overflow: 'hidden', backgroundColor: '#111318' }}>
-          {background(item, PW, PH)}
-          {noPhoto ? (
+          {isMapTpl(item.key) ? (
+            <MapShareCard a={a} variant={item.key} width={PW} height={PH} stats={stats} showLogo={showLogo} weightKg={weightKg} />
+          ) : background(item, PW, PH)}
+          {isMapTpl(item.key) ? null : noPhoto ? (
             <Pressable onPress={() => pick(false)} style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', gap: 10 }]}>
               <MaterialCommunityIcons name="image-plus" size={48} color="#ffffffcc" />
               <Text style={{ color: '#ffffffcc', fontWeight: '700' }}>{t('sh.addPhoto')}</Text>
@@ -272,7 +280,7 @@ export default function ShareActivity() {
           data={TEMPLATES}
           keyExtractor={(x) => x.key}
           renderItem={renderPage}
-          extraData={[photo, showRoute, tone, size, stats, showTitle, showLogo, pos, ovH, clearH, page, C.route]}
+          extraData={[photo, showRoute, tone, size, stats, showTitle, showLogo, pos, ovH, clearH, page, C.route, C.scheme, weightKg]}
           horizontal pagingEnabled showsHorizontalScrollIndicator={false}
           scrollEnabled={!dragging}
           scrollEventThrottle={50}
@@ -290,7 +298,7 @@ export default function ShareActivity() {
             ))}
           </View>
           <Text style={{ color: C.text, fontWeight: '800' }}>{t(tpl.label)}</Text>
-          <Text style={{ color: C.muted, fontSize: 12 }}>{isSticker ? t('sh.swipe') : t('sh.drag')}</Text>
+          <Text style={{ color: C.muted, fontSize: 12 }}>{isSticker || isMapTpl(tpl.key) ? t('sh.swipe') : t('sh.drag')}</Text>
         </View>
 
         {/* actions */}
@@ -316,12 +324,12 @@ export default function ShareActivity() {
           <NeuCard radius={26} style={{ gap: 12 }}>
             <Text style={F.label}>{t('sh.show')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {hasRoute && chip('route', t('sh.route'), showRoute, () => setShowRoute((v) => !v))}
+              {hasRoute && !isMapTpl(tpl.key) && chip('route', t('sh.route'), showRoute, () => setShowRoute((v) => !v))}
               {availableStats(a).map((k) => chip(k, t(`sh.${k}` as Key), stats.includes(k), () => toggleStat(k)))}
-              {chip('title', t('sh.name'), showTitle, () => setShowTitle((v) => !v))}
+              {!isMapTpl(tpl.key) && chip('title', t('sh.name'), showTitle, () => setShowTitle((v) => !v))}
               {chip('logo', t('sh.logo'), showLogo, () => setShowLogo((v) => !v))}
             </View>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
+            {!isMapTpl(tpl.key) && <View style={{ flexDirection: 'row', gap: 12 }}>
               <View style={{ flex: 1, gap: 8 }}>
                 <Text style={F.label}>{t('sh.text')}</Text>
                 <NeuSegmented value={tone} onChange={setTone} options={[{ key: 'light', label: t('sh.white') }, { key: 'dark', label: t('sh.dark') }]} />
@@ -332,7 +340,7 @@ export default function ShareActivity() {
                   <NeuSegmented value={size} onChange={setSize} options={[{ key: 's', label: 'S' }, { key: 'm', label: 'M' }, { key: 'l', label: 'L' }]} />
                 </View>
               )}
-            </View>
+            </View>}
           </NeuCard>
 
           {isSticker && (
@@ -355,6 +363,11 @@ export default function ShareActivity() {
             <View onLayout={ready}><StoryOverlay ref={stickerRef} {...overlayProps} width={EXPORT_W} /></View>
           )}
           {shot === 'card' && <View onLayout={ready}><ShareCard ref={cardRef} a={a} /></View>}
+          {shot === 'mapcard' && isMapTpl(tpl.key) && (
+            // ready once every map tile has loaded (or failed); capture() gives up waiting after 4 s
+            <MapShareCard ref={mapRef} a={a} variant={tpl.key} width={EXPORT_W} height={EXPORT_H} stats={stats} showLogo={showLogo}
+              weightKg={weightKg} onReady={ready} />
+          )}
           {shot === 'story' && (
             <View ref={storyRef} collapsable={false} onLayout={storyWaitsForPhoto ? undefined : ready}
               style={{ width: EXPORT_W, height: EXPORT_H, overflow: 'hidden', backgroundColor: tpl.bg ?? '#111318' }}>
