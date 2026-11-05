@@ -81,7 +81,7 @@ async function readActivityRaw(id: string): Promise<string | null> {
   return (await readBlob(blobKey(id))) ?? (await AsyncStorage.getItem(item(id)).catch(() => null));
 }
 
-/** Bump when bestEffort() changes meaning (v2: per segment, never across a pause) so cached PRs are rebuilt. */
+/** Bump when bestEffort() changes meaning (v2: never across a rest longer than 2 min) so cached PRs are rebuilt. */
 export const EFFORTS_V = 2;
 export function toSummary(a: Activity): Activity {
   const efforts: Record<string, number> = {};

@@ -60,6 +60,7 @@ export default function ActivityDetail() {
 
   const saveFailed = (e: unknown) => Alert.alert(t('act.couldNotSave'), String((e as Error)?.message ?? e));
   const saveName = async () => {
+    if (!loaded) { setEditing(false); return; }
     const next = { ...a, name: name.trim() || a.name };
     try { await saveActivity(next); } catch (e) { saveFailed(e); return; }
     setA(next); setEditing(false);
@@ -74,7 +75,8 @@ export default function ActivityDetail() {
   // story sticker / photo story / classic card all live on the share screen
   const onShare = () => router.push(`/share/${a.id}`);
 
-  const onExport = () => shareGpx(a).catch((e) => Alert.alert(t('act.exportFailed'), String(e?.message ?? e)));
+  // the list summary has simplified points: export and rename wait for the full activity
+  const onExport = () => { if (loaded) shareGpx(a).catch((e) => Alert.alert(t('act.exportFailed'), String(e?.message ?? e))); };
 
   const onDelete = () => Alert.alert(t('act.deleteQ'), undefined, [
     { text: t('act.cancel'), style: 'cancel' },
@@ -96,7 +98,7 @@ export default function ActivityDetail() {
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, paddingVertical: 4, paddingRight: 4 }}>
             <NeuIconButton icon="share-variant" size={38} accessibilityLabel={t('act.share')} onPress={onShare} />
-            <NeuIconButton icon="file-export-outline" size={38} accessibilityLabel={t('act.export')} onPress={onExport} />
+            <NeuIconButton icon="file-export-outline" size={38} accessibilityLabel={t('act.export')} disabled={!loaded} onPress={onExport} />
             <NeuIconButton icon="trash-can-outline" size={38} color={C.danger} accessibilityLabel={t('act.deleteA11y')} onPress={onDelete} />
           </View>
         ),
@@ -118,7 +120,7 @@ export default function ActivityDetail() {
               <TextInput value={name} onChangeText={setName} autoFocus onSubmitEditing={saveName} onBlur={saveName}
                 style={[F.h1, { backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }]} />
             ) : (
-              <Pressable onPress={() => setEditing(true)} accessibilityRole="button" accessibilityHint={t('act.rename')}
+              <Pressable disabled={!loaded} onPress={() => setEditing(true)} accessibilityRole="button" accessibilityHint={t('act.rename')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <IconWell icon={info.icon as never} size={40} />
                 <Text style={[F.h1, { flex: 1 }]}>{a.name}</Text>

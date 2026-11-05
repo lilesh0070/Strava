@@ -52,5 +52,6 @@ export function defaultRecapWeek(acts: Activity[], now = Date.now()): number {
   const thisWeek = mondayOf(now);
   const dow = (new Date(now).getDay() + 6) % 7; // Mon = 0
   const hasThisWeek = acts.some((a) => a.startedAt >= thisWeek && a.startedAt <= now);
-  return dow <= 1 || !hasThisWeek ? thisWeek - 7 * DAY : thisWeek;
+  // step back into last week by 3 days, not exactly 7 × 24 h: a DST change makes a week 167 or 169 hours
+  return dow <= 1 || !hasThisWeek ? mondayOf(thisWeek - 3 * DAY) : thisWeek;
 }

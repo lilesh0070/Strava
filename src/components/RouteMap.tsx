@@ -86,6 +86,7 @@ window.reset=function(d){
   var all=[];
   d.segs.forEach(function(s,i){ polys[i]=L.polyline(d.follow?s:[],style).addTo(lines); all=all.concat(s); });
   setCur(d.cur,d.follow);
+  if(d.follow && !d.cur && all.length>1 && !shown){ map.fitBounds(L.latLngBounds(all),{padding:[30,30],animate:false}); show(); } // restored recording, no fix yet: show the route
   if(!d.follow && all.length>1 && !fitted){ map.fitBounds(L.latLngBounds(all),{padding:[30,30],animate:false}); fitted=true; show(); }
   else if(!d.follow && all.length===1 && !fitted){ map.setView(all[0],15,{animate:false}); fitted=true; show(); }
   if(!d.follow){ if(all.length>1 && shown) reveal(d.segs); else d.segs.forEach(function(s,i){ polys[i].setLatLngs(s); }); }
@@ -125,9 +126,10 @@ function RouteMap({ segments, current, follow = false, style, interactive = true
   useEffect(() => { sync(false); });
   const syncRef = useRef(sync);
   useEffect(() => { syncRef.current = sync; });
-  const onLoadEnd = useCallback(() => { ready.current = true; syncRef.current(true); }, []);
   const tilesRef = useRef(onTiles);
   useEffect(() => { tilesRef.current = onTiles; });
+  // a (re)loaded page starts "online" and only reports going offline, so clear a stale offline state here
+  const onLoadEnd = useCallback(() => { ready.current = true; tilesRef.current?.('online'); syncRef.current(true); }, []);
   const onMessage = useCallback((e: { nativeEvent: { data: string } }) => {
     const m = e.nativeEvent.data;
     if (m === 'tiles-offline') tilesRef.current?.('offline');

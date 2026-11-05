@@ -104,7 +104,8 @@ export function kalmanStep(state: KalmanState | null | undefined, f: GpsFix, q =
   const ex = (f.lng - lng) * kx, ny = (f.lat - lat) * ky;
   const S = pp + sd * sd, d2 = ex * ex + ny * ny;
   if (d2 > GATE * S && d2 > 100) {
-    return { lat, lng, ve, vn, pp, pv, vv, t: f.t, n: s.n, rej: (s.rej ?? 0) + 1, vs: s.vs, outlier: true };
+    // keep dopT: one rejected spike must not make a standing Android phone lose its "stopped" Doppler chain
+    return { lat, lng, ve, vn, pp, pv, vv, t: f.t, n: s.n, rej: (s.rej ?? 0) + 1, vs: s.vs, outlier: true, dopT: s.dopT };
   }
   const kp = pp / S, kv = pv / S;
   lng += (ex * kp) / kx; lat += (ny * kp) / ky; ve += ex * kv; vn += ny * kv;

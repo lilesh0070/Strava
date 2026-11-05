@@ -45,6 +45,11 @@ test('best effort never spans a pause: two rested 600 m reps are not a 1 km effo
   assert.equal(bestEffort([rep1, rep2], 1000), null);
   // but a continuous km inside one segment still counts
   assert.ok(bestEffort([line(20, 60)], 1000)! > 0);
+  // a 40 s traffic-light auto-pause between two halves does not break the effort (stop time excluded)
+  const half1 = line(6, 30); // ~555 m in 2:30
+  const half2 = line(6, 30).map((p) => ({ ...p, lat: p.lat + 0.006, t: p.t + 150_000 + 40_000 }));
+  const e = bestEffort([half1, half2], 1000)!;
+  assert.ok(e > 260 && e < 290, `1 km across a short stop: ${e} s`);
 });
 
 test('derived stats follow the recorded distance when points carry it', () => {

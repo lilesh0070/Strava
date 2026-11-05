@@ -245,3 +245,14 @@ test('laps never add up to more than the moving time once a lap mark is clamped'
   const laps = lapsFromMarks(marks, 1000, 590);
   assert.equal(laps.reduce((s, l) => s + l.durationSec, 0), 590);
 });
+
+test('kalman: a rejected spike keeps the Doppler history (a standing Android phone stays "stopped")', () => {
+  let k: KalmanState | null = null;
+  for (let i = 0; i < 20; i++) k = kalmanStep(k, { ...pt(19, 72.8, i * 1000, 5), spd: 0.6, hdg: 10 }, 2);
+  for (let i = 20; i < 25; i++) k = kalmanStep(k, { ...pt(19, 72.8, i * 1000, 5), spd: 0, hdg: 0 }, 2);
+  const spike = kalmanStep(k, { ...pt(19 + 200 / M, 72.8, 25_000, 5), spd: 0, hdg: 0 }, 2);
+  assert.equal(spike.outlier, true);
+  assert.equal(spike.dopT, k!.dopT);
+  const after = kalmanStep(spike, { ...pt(19, 72.8, 26_000, 5), spd: 0, hdg: 0 }, 2);
+  assert.equal(after.dopT, 26_000); // still read as a measured stop
+});

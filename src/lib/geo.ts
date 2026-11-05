@@ -136,14 +136,26 @@ export function splits(segments: Point[][], unitM = 1000): Split[] {
   return out;
 }
 
+/** Longer than this between two segments is a real rest: a best effort never spans it. */
+export const EFFORT_BREAK_MS = 120_000;
+
 /**
- * Fastest time (s) to cover `target` metres continuously, or null. Each segment is searched on its own: a
- * pause (rest between intervals) breaks the effort, so 5 × 1 km with rests is not a 5 km best.
+ * Fastest time (s) to cover `target` metres continuously, or null. Segments separated by a short stop (an
+ * auto-pause at a traffic light) are searched together, with the stop excluded as before; a rest longer
+ * than EFFORT_BREAK_MS breaks the effort, so 5 × 1 km with 3-minute rests is not a 5 km best.
  */
 export function bestEffort(segments: Point[][], target: number): number | null {
-  let best = Infinity;
+  const groups: Point[][][] = [];
   for (const seg of segments) {
-    const { d, s } = cumulative([seg]);
+    if (!seg.length) continue;
+    const g = groups[groups.length - 1];
+    const prev = g?.[g.length - 1];
+    if (g && prev?.length && seg[0].t - prev[prev.length - 1].t <= EFFORT_BREAK_MS) g.push(seg);
+    else groups.push([seg]);
+  }
+  let best = Infinity;
+  for (const group of groups) {
+    const { d, s } = cumulative(group);
     if (!d.length || d[d.length - 1] - d[0] < target) continue;
     let j = 0;
     for (let i = 0; i < d.length; i++) {

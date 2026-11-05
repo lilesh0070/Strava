@@ -226,23 +226,7 @@ export function ingest(locations: Location.LocationObject[]) {
           const settled = kf.n >= 3 || accOk(f, 15);
           if (!res.still && settled && acceptPoint(seg[seg.length - 1], q, s.sport === 'ride' ? 45 : 12, 3)) {
             seg.push({ ...q, d: r(s.distanceM ?? 0, 1) });
-          } else if (settings.autoPause && s.sport !== 'hike' && (s.distanceM ?? 0) > 0) {
-            // Idle since the last kept point, or since this segment began. Never measured from a point
-            // before the last resume, or a manual pause would be subtracted a second time. (Not for hikes:
-            // a 0.5 m/s scramble over rocks looks like standing still to GPS and would pause every minute.)
-            const kept = seg[seg.length - 1];
-            const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : p.t);
-            if (p.t - idleSince >= AUTO_PAUSE_AFTER_MS) {
-              settleDistance(s);
-              s.status = 'paused';
-              s.autoPaused = true;
-              s.pauseStartedAt = idleSince;
-              // the pause is back-dated: a lap pressed while already standing can't be later than moving time
-              const mov = sessionMovingSec(s, p.t);
-              if (s.laps?.some((l) => l.movingSec > mov)) s.laps = s.laps.map((l) => (l.movingSec > mov ? { ...l, movingSec: mov } : l));
-              if (settings.voiceCues) say(phrase().paused);
-            }
-          }
+          } else maybeAutoPause(s, seg, p.t);
           if (s.status === 'recording') {
             coachPace(s, p.t);
             checkTargets(s, p.t);
@@ -256,8 +240,8 @@ export function ingest(locations: Location.LocationObject[]) {
               }
             }
           }
-        }
-      }
+        } else maybeAutoPause(s, seg, p.t); // a rejected jump is not movement
+      } else maybeAutoPause(s, seg, p.t); // indoors (Wi-Fi / cell fixes only) the idle clock still runs
       stepWorkout(s, p.t); // time-based interval steps: checked on every fix, kept or not
     }
     if (session) await (session.status !== statusBefore ? persist() : persistSoon());
@@ -271,6 +255,27 @@ async function liveStats(force = false) {
   if (!session) return;
   if (!settings.liveNotification) { await clearLiveNotification(); return; }
   await updateLiveNotification(session, sessionMovingSec(session, Date.now()), currentSpeed(), settings.language, force);
+}
+
+/**
+ * Auto-pause after AUTO_PAUSE_AFTER_MS without a kept point, measured from the last kept point or from when
+ * this segment began (never from before the last resume, or a manual pause would be subtracted twice).
+ * Called for every fix that keeps no point, including inaccurate ones (indoors) and rejected jumps. Not for
+ * hikes: a 0.5 m/s scramble over rocks looks like standing still to GPS and would pause every minute.
+ */
+function maybeAutoPause(s: Session, seg: Point[], now: number) {
+  if (!settings.autoPause || s.sport === 'hike' || s.status !== 'recording' || !((s.distanceM ?? 0) > 0)) return;
+  const kept = seg[seg.length - 1];
+  const idleSince = kept?.t ?? s.segStartedAt ?? (s.segments.length === 1 ? s.startedAt : now);
+  if (now - idleSince < AUTO_PAUSE_AFTER_MS) return;
+  settleDistance(s);
+  s.status = 'paused';
+  s.autoPaused = true;
+  s.pauseStartedAt = idleSince;
+  // the pause is back-dated: a lap pressed while already standing can't be later than moving time
+  const mov = sessionMovingSec(s, now);
+  if (s.laps?.some((l) => l.movingSec > mov)) s.laps = s.laps.map((l) => (l.movingSec > mov ? { ...l, movingSec: mov } : l));
+  if (settings.voiceCues) say(phrase().paused);
 }
 
 /** Credit the distance a chord path still holds back; called when a segment ends. */
@@ -332,10 +337,12 @@ export function currentSpeed(): number | null {
   if (!session || session.status !== 'recording') return null;
   const now = Date.now();
   if (now - lastFixAt >= 5_000 || session.ds?.still) return null;
+  // freshness of the fix itself is judged by arrival time above; Doppler / track age in GPS time below, so a
+  // phone clock that is off from GPS time can't hide "pace now"
   const kf = session.kf;
-  if (kf && typeof kf.vs === 'number' && kf.n > 2 && hasDoppler(kf, now)) return kf.vs < STOPPED_MS ? null : kf.vs;
+  if (kf && typeof kf.vs === 'number' && kf.n > 2 && hasDoppler(kf, kf.t)) return kf.vs < STOPPED_MS ? null : kf.vs;
   const last = cred[cred.length - 1];
-  if (!last || now - last.t > 15_000) return null;
+  if (!last || !kf || kf.t - last.t > 15_000) return null;
   return creditedSpeed(30);
 }
 
@@ -487,6 +494,12 @@ async function isTracking() {
 }
 
 export type PermissionResult = 'background' | 'foreground' | 'denied';
+
+/** Foreground or background access, read without any dialog (call only once foreground is granted). */
+export async function grantedLevel(): Promise<'background' | 'foreground'> {
+  try { return (await Location.getBackgroundPermissionsAsync()).status === 'granted' ? 'background' : 'foreground'; }
+  catch { return 'foreground'; }
+}
 
 /** Where location permission stands, without showing a dialog (the Record tab asks in-app first). */
 export async function permissionStatus(): Promise<'granted' | 'undetermined' | 'denied'> {

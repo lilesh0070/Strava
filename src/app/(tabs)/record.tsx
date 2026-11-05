@@ -133,7 +133,9 @@ export default function Record() {
     const check = () => tracker.permissionStatus().then(async (st) => {
       if (cancelled) return;
       if (st !== 'granted') { setPerm(st === 'denied' ? 'denied' : 'unasked'); return; }
-      const p = await tracker.ensurePermissions(false); // already granted: no dialog, tells us foreground vs background
+      // already granted: read foreground vs background without any request, so an Android user who kept
+      // "Approximate" is not shown the upgrade dialog again every time the app comes back to the front
+      const p = await tracker.grantedLevel();
       if (cancelled) return;
       setPerm(p);
       checkPrecision();
@@ -224,15 +226,26 @@ export default function Record() {
     // permission may have changed in system Settings since this tab was focused; Start is also where
     // "Allow all the time" is requested (once)
     let p = perm;
-    if (p !== 'background') { p = await tracker.ensurePermissions(true); setPerm(p); }
+    let pr = precision;
+    if (p !== 'background') {
+      const before = p;
+      p = await tracker.ensurePermissions(true);
+      setPerm(p);
+      // first grant happens right here: precision was never read (and the user may have picked Approximate)
+      if (p !== 'denied' && before !== 'foreground') {
+        pr = await tracker.locationPrecision();
+        setPrecision(pr);
+        tracker.setWarmUp(true);
+      }
+    }
     if (p === 'denied') {
       Alert.alert(t('rec.locNeededTitle'), t('rec.locNeededBody'), [
         { text: t('rec.cancel'), style: 'cancel' }, { text: t('rec.openSettings'), onPress: () => Linking.openSettings() },
       ]);
       return false;
     }
-    if (precision !== 'precise' && !(await fixPrecision())) return false;
-    if (health !== 'good' && precision === 'precise') {
+    if (pr !== 'precise' && !(await fixPrecision())) return false;
+    if (health !== 'good' && pr === 'precise') {
       const go = await new Promise<boolean>((resolve) => Alert.alert(
         health === 'lost' ? t('rec.noGpsTitle') : t('rec.weakTitle'),
         t('rec.weakBody'),

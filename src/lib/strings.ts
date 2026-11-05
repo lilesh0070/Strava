@@ -166,6 +166,7 @@ const en = {
   'wk.title': 'My week', 'wk.share': 'Share my week', 'wk.image': 'Image', 'wk.text': 'Copy as text', 'wk.this': 'This week', 'wk.last': 'Last week',
   'wk.activities': 'activities', 'wk.best': 'BEST PACE', 'wk.steps': 'STEPS', 'wk.streak': 'STREAK', 'wk.weeks': 'weeks', 'wk.vsLast': 'vs last week',
   'wk.rank': 'among friends', 'wk.distance': 'DISTANCE', 'wk.time': 'TIME', 'wk.empty': 'No activities this week yet',
+  'wk.copied': 'Copied. Paste it in your chat.',
   // app updates (settings card + banner)
   'upd.tapCheck': 'Tap to check for a newer version.', 'upd.checking': 'Checking…', 'upd.downloading': 'Downloading update…',
   'upd.ready': 'Update downloaded. Restart to apply.', 'upd.available': 'Version {v} is available', 'upd.upToDate': "You're up to date · checked {time}",
@@ -433,6 +434,7 @@ const hi: Partial<Record<Key, string>> = {
   'wk.title': 'मेरा हफ़्ता', 'wk.share': 'हफ़्ते का कार्ड शेयर करें', 'wk.image': 'इमेज', 'wk.text': 'टेक्स्ट कॉपी करें', 'wk.this': 'इस हफ़्ते', 'wk.last': 'पिछला हफ़्ता',
   'wk.activities': 'एक्टिविटी', 'wk.best': 'बेस्ट पेस', 'wk.steps': 'कदम', 'wk.streak': 'स्ट्रीक', 'wk.weeks': 'हफ़्ते', 'wk.vsLast': 'पिछले हफ़्ते से',
   'wk.rank': 'दोस्तों में', 'wk.distance': 'दूरी', 'wk.time': 'समय', 'wk.empty': 'इस हफ़्ते अभी कोई एक्टिविटी नहीं',
+  'wk.copied': 'कॉपी हो गया। अब अपनी चैट में पेस्ट करें।',
   'upd.tapCheck': 'नया वर्ज़न देखने के लिए टैप करें।', 'upd.checking': 'जाँच रहे हैं…', 'upd.downloading': 'अपडेट डाउनलोड हो रहा है…',
   'upd.ready': 'अपडेट डाउनलोड हो गया। लागू करने के लिए रीस्टार्ट करें।', 'upd.available': 'वर्ज़न {v} उपलब्ध है', 'upd.upToDate': 'आप अप-टू-डेट हैं · {time} पर जाँचा',
   'upd.build': 'बिल्ड', 'upd.progress': 'डाउनलोड हो रहा है… {p}%', 'upd.whatsNew': 'नया क्या है', 'upd.restart': 'रीस्टार्ट करके अपडेट करें',

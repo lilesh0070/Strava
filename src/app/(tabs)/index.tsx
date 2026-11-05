@@ -69,21 +69,33 @@ export default function Feed() {
   const recapRef = useRef<ShareCardHandle>(null);
   const weekLabels = { activities: t('wk.activities'), best: t('wk.best').toLowerCase(), steps: t('wk.steps').toLowerCase(),
     streak: t('wk.streak').toLowerCase(), vsLast: t('wk.vsLast'), rank: t('wk.rank') };
+  const sharing = useRef(false);
+  const [shareBusy, setShareBusy] = useState(false);
   const openShare = async (r: WeekRecap) => {
+    if (sharing.current) return; // a second tap while the friends rank loads must not stack dialogs
+    sharing.current = true;
+    setShareBusy(true);
+    try { await showShare(r); } finally { sharing.current = false; setShareBusy(false); }
+  };
+  const showShare = async (r: WeekRecap) => {
     setRecapWeek(r.start);
     const isThis = isCurrentWeek(r.start);
     const [p, rk] = await Promise.all([
       getProfile().catch(() => null),
-      // friends rank only exists for the current week
-      isThis && friends ? friends.isEnabled().then((on) => (on ? friends!.board('week') : [])).then((b) => b.find((x) => x.me)?.rank ?? null).catch(() => null) : Promise.resolve(null),
+      // friends rank only exists for the current week; a slow network must not hold the dialog back
+      isThis && friends ? Promise.race([
+        friends.isEnabled().then((on) => (on ? friends!.board('week') : [])).then((b) => b.find((x) => x.me)?.rank ?? null).catch(() => null),
+        new Promise<null>((res) => setTimeout(() => res(null), 2500)),
+      ]) : Promise.resolve(null),
     ]);
     if (p?.name) setName(p.name);
     setRank(rk);
     const dateText = recapDateText(r);
     const text = weekText(r, { title: t('wk.title'), dateText, labels: weekLabels, rank: rk });
     const buttons = [
-      { text: isThis ? t('wk.last') : t('wk.this'), onPress: () => openShare(weekRecap(items ?? [], isThis ? r.start - 7 * 86_400_000 : r.start + 7 * 86_400_000)) },
-      { text: t('wk.text'), onPress: async () => { await Clipboard.setStringAsync(text); showToast(t('sh.copied')); } },
+      // step into the neighbouring week by days, not exactly 7 × 24 h (DST weeks are 167 / 169 hours)
+      { text: isThis ? t('wk.last') : t('wk.this'), onPress: () => openShare(weekRecap(items ?? [], isThis ? r.start - 3 * 86_400_000 : r.end)) },
+      { text: t('wk.text'), onPress: async () => { await Clipboard.setStringAsync(text); showToast(t('wk.copied')); } },
       { text: t('wk.image'), onPress: async () => {
         try {
           await new Promise((res) => setTimeout(res, 80)); // let the off-screen card render this week
@@ -112,7 +124,7 @@ export default function Feed() {
             {trend == null ? t('feed.nothingLast') : `${trend >= 0 ? '▲' : '▼'} ${Math.abs(trend)}% ${t('feed.vsLast')} (${cmp.lastKm.toFixed(1)} km)`}
           </Text>
         </View>
-        <NeuIconButton icon="share-variant" size={40} accessibilityLabel={t('wk.share')} onPress={() => openShare(recap)} />
+        <NeuIconButton icon="share-variant" size={40} accessibilityLabel={t('wk.share')} busy={shareBusy} onPress={() => openShare(recap)} />
       </NeuCard>
 
       <View style={{ marginHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16,

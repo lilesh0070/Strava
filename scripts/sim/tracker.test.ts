@@ -180,3 +180,16 @@ test('saved activity: splits, chord total and best efforts agree with the headli
   const km = geo.bestEffort(a.segments, 1000)!;
   assert.ok(km > 290 && km < 340, `fastest km ${km} s at 3.2 m/s`);
 });
+
+test('auto-pause still fires indoors where every fix is a Wi-Fi fix (acc > 50 m)', async () => {
+  await tracker.start('run');
+  await run(120, 5, 3);
+  assert.equal(tracker.getSession()!.status, 'recording');
+  await run(40, 80, 0); // indoors: inaccurate fixes only
+  const s = tracker.getSession()!;
+  assert.equal(s.status, 'paused', 'auto-paused on unusable fixes');
+  assert.equal(s.autoPaused, true);
+  const moving = sessionMovingSec(s, clock);
+  assert.ok(moving <= 125, `moving time ${moving} s must not count the indoor minutes`);
+  await tracker.discard();
+});

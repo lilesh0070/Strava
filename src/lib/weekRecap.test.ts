@@ -36,9 +36,20 @@ test('week recap: per-day km, totals, best pace, change vs last week, streak', (
 test('default recap week: last week on Monday/Tuesday or when this week is empty, else this week', () => {
   const acts = [act({ startedAt: mon - 2 * DAY })];
   const mon0 = new Date(2026, 10, 2).getTime(); // Monday 00:00
-  assert.equal(defaultRecapWeek(acts, mon + 3600_000), mon0 - 7 * DAY); // Monday morning → last week
-  assert.equal(defaultRecapWeek(acts, mon + 3 * DAY), mon0 - 7 * DAY); // Thursday, nothing yet this week → last week
+  const prevMon = new Date(2026, 9, 26).getTime(); // the Monday before (not mon0 − 7 × 24 h: DST ends on 1 Nov in the US)
+  assert.equal(defaultRecapWeek(acts, mon + 3600_000), prevMon); // Monday morning → last week
+  assert.equal(defaultRecapWeek(acts, mon + 3 * DAY), prevMon); // Thursday, nothing yet this week → last week
   assert.equal(defaultRecapWeek([...acts, act({ startedAt: mon + 2 * DAY })], mon + 3 * DAY), mon0); // Thursday with a run → this week
+});
+
+test('default recap week is right across a DST change', () => {
+  // whatever the TZ, mondayOf of the result must be the Monday before this week's Monday
+  for (const day of [new Date(2026, 10, 3, 9), new Date(2027, 2, 15, 9), new Date(2026, 9, 27, 9)]) {
+    const now = day.getTime();
+    const thisMon = new Date(day.getFullYear(), day.getMonth(), day.getDate() - ((day.getDay() + 6) % 7)).getTime();
+    const lastMon = new Date(new Date(thisMon).getFullYear(), new Date(thisMon).getMonth(), new Date(thisMon).getDate() - 7).getTime();
+    assert.equal(defaultRecapWeek([], now), lastMon);
+  }
 });
 
 test('week text block for WhatsApp', () => {
