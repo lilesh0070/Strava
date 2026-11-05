@@ -1,7 +1,8 @@
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, ScrollView, Share, Text, TextInput, View } from 'react-native';
 import { IconWell, NeuButton, NeuCard, NeuIconButton, NeuProgress, NeuSegmented, NeuSwitch, NeuTile } from '../components/Neu';
 import { parsePace } from '../lib/live';
 import { setBreakReminders, setDailyReminder } from '../lib/reminders';
@@ -10,9 +11,12 @@ import GithubSyncCard from '../components/GithubSyncCard';
 import { exportBackup, importBackup, storageBytes } from '../lib/backup';
 import { getSettings, updateSettings } from '../lib/storage';
 import { useTheme } from '../lib/theme';
-import { refreshSettings } from '../lib/tracker';
+import { getSession, refreshSettings, subscribe as onRecordingChange } from '../lib/tracker';
 import type { Settings } from '../lib/types';
-import { applyOta, checkForUpdates, currentBuildId, currentVersion, installApk, useUpdateState } from '../lib/updates';
+import { applyOta, checkForUpdates, currentBuildId, currentVersion, installApk, RECORDING_ACTIVE, useUpdateState } from '../lib/updates';
+import { clearCrashLog, crashLogText, getCrashLog, logError } from '../lib/crashHandler';
+import { userError, type CrashKind } from '../lib/crashLog';
+import { showToast } from '../lib/toast';
 import { useT } from '../lib/i18n';
 import { shareApp } from '../lib/shareApp';
 
@@ -33,6 +37,13 @@ export default function SettingsScreen() {
   const [s, setS] = useState<Settings | null>(null);
   const [bytes, setBytes] = useState<number | null>(null);
   const u = useUpdateState();
+  // installing an APK replaces the app and would end a recording's GPS, so it waits until the activity is finished
+  const recording = useSyncExternalStore(onRecordingChange, () => !!getSession());
+  // tester options (pre-release builds, the error log while empty) stay hidden until the version line is tapped 7 times
+  const [tester, setTester] = useState(false);
+  const taps = useRef({ n: 0, at: 0 });
+  const [crashLog, setCrashLog] = useState(getCrashLog);
+  const [showLog, setShowLog] = useState(false);
 
   const loadSettings = () => getSettings().then((x) => { setS(x); setPaceText(x.targetPaceSec ? fmtDuration(x.targetPaceSec) : ''); return x; });
   useEffect(() => {
@@ -84,8 +95,24 @@ export default function SettingsScreen() {
       right={<NeuSwitch accessibilityLabel={title} value={!!s[key]} onValueChange={(v) => set({ [key]: v } as Partial<Settings>)} />} />
   );
 
+  /** A failed action: a short translated message for the user, the raw error into the error log. */
+  const failed = (title: string, e: unknown) => {
+    logError(e, 'caught');
+    setCrashLog(getCrashLog());
+    Alert.alert(title, userError(t, e));
+  };
+  const tapVersion = () => {
+    const now = Date.now();
+    taps.current = { n: now - taps.current.at < 1500 ? taps.current.n + 1 : 1, at: now };
+    if (taps.current.n >= 7 && !tester) { setTester(true); showToast(t('crash.testerOn')); }
+  };
+  const kindLabel = (k: CrashKind) => t(`crash.kind.${k}`);
+  const when = (at: number) => new Date(at).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+
   // ---------- update card ----------
   const downloading = u.apkProgress != null;
+  // the recording guard's error only matters while the recording runs (it is shown in its own line then)
+  const updError = u.error && u.error !== RECORDING_ACTIVE ? userError(t, u.error, 'raw') : null;
   let status = t('upd.tapCheck');
   if (u.checking) status = t('upd.checking');
   else if (u.ota === 'downloading') status = t('upd.downloading');
@@ -100,11 +127,12 @@ export default function SettingsScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon={u.apk || u.ota === 'ready' ? 'rocket-launch-outline' : 'shield-check-outline'} size={52} />
             <View style={{ flex: 1 }}>
-              <Text style={F.h2}>TBDI FitTrack {currentVersion()}</Text>
+              <Text style={F.h2} onPress={tapVersion} suppressHighlighting>TBDI FitTrack {currentVersion()}</Text>
               <Text style={{ color: C.muted, fontSize: 12 }}>{t('upd.build')} {currentBuildId()}</Text>
             </View>
           </View>
-          <Text style={{ color: u.error ? C.danger : C.text }}>{u.error ?? status}</Text>
+          <Text style={{ color: updError ? C.danger : C.text }}>{updError ?? status}</Text>
+          {u.apk && recording ? <Text style={{ color: C.muted, fontSize: 13 }}>{t('crash.updRecording')}</Text> : null}
 
           {downloading && (
             <View style={{ gap: 6 }}>
@@ -130,12 +158,12 @@ export default function SettingsScreen() {
                   <Text style={{ color: C.muted, fontSize: 13 }}>{t('upd.reinstallBody')}</Text>
                 </NeuCard>
                 <NeuButton icon="cloud-upload-outline" label={t('upd.backupNow')}
-                  onPress={() => exportBackup().catch((e) => Alert.alert(t('set.backup'), String(e?.message ?? e)))} />
+                  onPress={() => exportBackup().catch((e) => failed(t('set.backupFailed'), e))} />
                 <NeuButton accent icon="download" label={t('upd.downloadApk')} onPress={() => Linking.openURL(u.apk!.url)} />
               </View>
             ) : u.apk ? (
               <NeuButton accent icon="download" label={downloading ? t('upd.dl') : t('upd.install')} style={{ flex: 1 }}
-                disabled={downloading} onPress={() => installApk()} />
+                disabled={downloading || recording} onPress={() => installApk()} />
             ) : (
               <NeuButton icon="refresh" label={u.checking ? '…' : t('set.check')} style={{ flex: 1 }}
                 disabled={u.checking} onPress={() => checkForUpdates()} />
@@ -144,14 +172,16 @@ export default function SettingsScreen() {
           {u.apk && !u.reinstall ? (
             <Text style={{ color: C.muted, fontSize: 11 }}>{t('upd.androidNote')}</Text>
           ) : null}
-          {u.apk && u.error && !downloading ? (
+          {u.apk && updError && !downloading ? (
             <NeuButton small icon="open-in-new" label={t('upd.openPage')} onPress={() => Linking.openURL(u.apk!.htmlUrl)} />
           ) : null}
         </NeuCard>
         {toggle('update', t('set.checkAuto'), t('set.checkAutoSub'), 'autoCheckUpdates')}
-        <NeuTile icon="flask-outline" title={t('set.beta')} subtitle={t('set.betaSub')}
-          right={<NeuSwitch accessibilityLabel={t('set.beta')} value={s.betaUpdates}
-            onValueChange={async (v) => { await set({ betaUpdates: v }); checkForUpdates(); }} />} />
+        {tester || s.betaUpdates ? (
+          <NeuTile icon="flask-outline" title={t('set.beta')} subtitle={t('set.betaSub')}
+            right={<NeuSwitch accessibilityLabel={t('set.beta')} value={s.betaUpdates}
+              onValueChange={async (v) => { setTester(true); await set({ betaUpdates: v }); checkForUpdates(); }} />} />
+        ) : null}
       </Section>
 
       <Section title={t('set.appearance')}>
@@ -173,6 +203,7 @@ export default function SettingsScreen() {
         {toggle('pause-circle-outline', t('set.autoPause'), t('set.autoPauseSub'), 'autoPause')}
         {Platform.OS === 'android' && toggle('cellphone-text', t('set.liveNotif'), t('set.liveNotifSub'), 'liveNotification')}
         {toggle('timer-3', t('set.countdown'), t('set.countdownSub'), 'countdown')}
+        {toggle('cellphone-screenshot', t('crash.keepScreen'), t('crash.keepScreenSub'), 'keepScreenOn')}
         <NeuCard radius={26} style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon="crosshairs-gps" />
@@ -311,7 +342,7 @@ export default function SettingsScreen() {
             .then(({ unreadable }) => {
               if (unreadable) Alert.alert(t('set.leftOut'), unreadable === 1 ? t('set.leftOutBody1') : t('set.leftOutBody').replace('{n}', String(unreadable)));
             })
-            .catch((e) => Alert.alert(t('set.backupFailed'), String(e?.message ?? e)))} />
+            .catch((e) => failed(t('set.backupFailed'), e))} />
         <NeuTile icon="cloud-download-outline" title={t('set.restore')} subtitle={t('set.restoreSub')}
           onPress={async () => {
             try {
@@ -325,7 +356,7 @@ export default function SettingsScreen() {
               if (next.reminder && !ok) set({ reminder: false });
               Alert.alert(t('set.restored'), t('set.restoredBody').replace('{n}', String(n)));
               storageBytes().then(setBytes).catch(() => undefined);
-            } catch (e) { Alert.alert(t('set.restoreFailed'), String((e as Error)?.message ?? e)); }
+            } catch (e) { failed(t('set.restoreFailed'), e); }
           }} />
         {bytes != null && (
           <Text style={{ color: C.muted, fontSize: 12, marginLeft: 6 }}>{t('set.usage').replace('{kb}', (bytes / 1024).toFixed(0))}</Text>
@@ -335,6 +366,31 @@ export default function SettingsScreen() {
       <Section title={t('set.about')}>
         <NeuTile icon="share-variant" title={t('app.share')} subtitle={t('app.shareSub')}
           onPress={() => shareApp(t).catch(() => undefined)} />
+        {tester || crashLog.entries.length > 0 ? (
+          <NeuTile icon="bug-outline" title={t('crash.log')}
+            subtitle={crashLog.entries.length ? `${t('crash.logLast')}: ${when(crashLog.entries[crashLog.entries.length - 1].at)}` : t('crash.logEmpty')}
+            onPress={() => { setCrashLog(getCrashLog()); setShowLog((v) => !v); }} />
+        ) : null}
+        {showLog && crashLog.entries.length > 0 ? (
+          <NeuCard inset radius={18} padding={12} style={{ gap: 12 }}>
+            {[...crashLog.entries].reverse().map((e, i) => (
+              <View key={`${i}-${e.at}`} style={{ gap: 2 }}>
+                <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
+                  {when(e.at)} · {kindLabel(e.kind)}{e.n ? ` ×${e.n}` : ''} · {e.v} ({e.b})
+                </Text>
+                <Text selectable style={{ color: C.muted, fontSize: 11 }} numberOfLines={4}>{[e.msg, e.stack].filter(Boolean).join('\n')}</Text>
+              </View>
+            ))}
+            <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+              <NeuButton small icon="content-copy" label={t('crash.copyLog')}
+                onPress={() => Clipboard.setStringAsync(crashLogText()).then(() => showToast(t('crash.copied'))).catch(() => undefined)} />
+              <NeuButton small icon="share-variant" label={t('crash.share')}
+                onPress={() => { Share.share({ message: crashLogText() }).catch(() => undefined); }} />
+              <NeuButton small icon="delete-outline" label={t('crash.clear')}
+                onPress={() => { clearCrashLog(); setCrashLog(getCrashLog()); setShowLog(false); }} />
+            </View>
+          </NeuCard>
+        ) : null}
         <Text style={{ color: C.muted, fontSize: 11, marginLeft: 6 }}>{t('set.mapCredit')}</Text>
       </Section>
     </ScrollView>

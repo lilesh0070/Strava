@@ -1,6 +1,8 @@
-// GPS recording engine. Uses a background location task when "Always" permission is granted
-// (keeps recording with the screen off via an Android foreground service), and falls back to a
-// foreground watcher otherwise. Session state is persisted so a killed app can resume.
+// GPS recording engine. A recording runs on the location task, which keeps recording with the screen
+// off (Android: a foreground service with its notification; iPhone: background location with the blue
+// indicator) and needs only "While using the app" access, as long as it is started from the visible app.
+// A plain watcher (stops when the app leaves the screen) is only the fallback, replaced by the task as
+// soon as the app is on screen again. Session state is persisted so a killed app can resume.
 //
 // Precision: full GNSS every second with no distance filter (so the live position and the ±m chip
 // never go stale), a constant-velocity Kalman filter fed with GPS Doppler speed + course, outlier
@@ -19,7 +21,7 @@ import { advance, findWorkout, startProgress, stepCue } from './workouts';
 import { clearLiveNotification, clearStaleLiveNotification, ensureLiveNotificationPermission, updateLiveNotification } from './liveNotification';
 import { MOVING_MS, STOPPED_MS, creditedSpeed as creditedSpeedOf, distanceStep, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, processNoise, settlePending, type CreditSample, type GpsFix, type KalmanState } from './live';
 import { autoSync } from './githubSync';
-import { kmCueHi, speechLanguage, voicePhrases } from './strings';
+import { kmCueHi, speechLanguage, translate, voicePhrases } from './strings';
 import { readBlob, removeBlob, writeBlob } from './blobStore';
 import { isOnFoot, stepDelta } from './steps';
 import { defaultGear, getSettings, saveActivity } from './storage';
@@ -77,6 +79,7 @@ AppState.addEventListener('change', (st) => {
   if (appActive) notify();
   else locked(persist).catch(() => undefined); // make sure nothing is lost if the OS kills us (queued, so it can't revive a finished session)
   syncWarm(); // pre-start GPS only runs while the app is on screen
+  if (appActive) upgradeUpdates(); // back on screen: a recording on the fallback watcher moves to the location task
 });
 function notify() { if (appActive) listeners.forEach((l) => l()); }
 
@@ -476,9 +479,18 @@ export async function ensureStepPermission(): Promise<boolean> {
 export async function restore(): Promise<Session | null> {
   await locked(load);
   if (session && !lastFixAt) lastFixAt = Date.now(); // give GPS a moment before the watchdog judges it
-  if (session && !(await isTracking())) { lastFixAt = Date.now(); await startUpdates(); }
+  if (session && !(await isTracking())) {
+    lastFixAt = Date.now();
+    await refreshSettings(); // GPS mode, and the language of the foreground-service notification
+    await startUpdates();
+  }
   if (session) { startSteps(); prepareSpeechAudio(); locked(() => liveStats(true)).catch(() => undefined); }
-  else clearStaleLiveNotification().catch(() => undefined);
+  else {
+    clearStaleLiveNotification().catch(() => undefined);
+    // no recording: a location task left over from before must not keep GPS and its notification on
+    // (under the lock, so it can't stop the GPS of a recording that Start creates meanwhile)
+    locked(async () => { if (!session) await stopUpdates(); }).catch(() => undefined);
+  }
   syncWarm();
   notify();
   return session;
@@ -486,12 +498,17 @@ export async function restore(): Promise<Session | null> {
 
 // ---------- watchdog ----------
 // Some Android builds silently stop delivering fixes (provider hiccup, OEM battery killers). Called every
-// second by the Record screen: if a recording has had no fix for 20 s, GPS is restarted.
+// second by the Record screen: if a recording has had no fix for 20 s, GPS is restarted. Never while the app
+// is in the background: Android refuses to start a foreground service there, so a restart would end the
+// screen-off recording instead of fixing it. A recording on the fallback watcher is moved to the location task.
 let restartedAt = 0;
 let restarting = false;
+/** When the watchdog last tried to move a recording from the fallback watcher to the location task. */
+let upgradeTriedAt = 0;
 export async function watchdog() {
-  if (!session || !appActive || restarting) return;
+  if (!session || !appActive || restarting || ending > 0) return;
   const now = Date.now();
+  if (watcher && now - upgradeTriedAt >= 30_000) { upgradeTriedAt = now; await upgradeUpdates(); return; }
   if (now - lastFixAt < 20_000 || now - restartedAt < 45_000) return;
   restarting = true;
   restartedAt = now;
@@ -503,16 +520,33 @@ export async function watchdog() {
 
 async function isTracking() {
   if (watcher) return true;
-  try { return await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK); } catch { return false; }
+  try {
+    const on = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK);
+    if (on) setMode('task');
+    return on;
+  } catch { return false; }
 }
 
-export type PermissionResult = 'background' | 'foreground' | 'denied';
+/**
+ * How the recording gets its fixes: the location task (keeps going with the screen off) or the fallback
+ * watcher (stops when the app leaves the screen, so the Record screen asks to keep the app open).
+ */
+export type TrackingMode = 'task' | 'watcher';
+let mode: TrackingMode | null = null;
+export const trackingMode = () => mode;
+function setMode(m: TrackingMode | null) { if (m !== mode) { mode = m; notify(); } }
 
-/** Foreground or background access, read without any dialog (call only once foreground is granted). */
-export async function grantedLevel(): Promise<'background' | 'foreground'> {
-  try { return (await Location.getBackgroundPermissionsAsync()).status === 'granted' ? 'background' : 'foreground'; }
-  catch { return 'foreground'; }
+/** Finish or Discard is running: GPS must not be (re)started meanwhile, or it would keep running after it. */
+let ending = 0;
+async function whileEnding<T>(fn: () => Promise<T>): Promise<T> {
+  ending++;
+  try { return await fn(); } finally { ending--; }
 }
+
+/** The app is in the foreground (on iOS "inactive" too: still in front, e.g. under a system dialog). */
+const inForeground = () => appActive || (Platform.OS === 'ios' && AppState.currentState === 'inactive');
+
+export type PermissionResult = 'granted' | 'denied';
 
 /** Where location permission stands, without showing a dialog (the Record tab asks in-app first). */
 export async function permissionStatus(): Promise<'granted' | 'undetermined' | 'denied'> {
@@ -545,30 +579,18 @@ export async function improvePrecision(): Promise<Precision> {
   return locationPrecision();
 }
 
-const BG_ASKED = 'stride:bg-permission-asked';
-
 /**
- * Location permission. Background ("Allow all the time") is only requested when `askBackground` is set
- * (on Start), and only once: on Android 11+ that request opens the system Settings page, which must not
- * happen every time the Record tab is opened.
+ * Location permission: "While using the app" (Android) / "While Using" (iPhone). That is all a recording
+ * needs, also with the screen off, because the location task is started from the visible app (see
+ * startUpdates). "Allow all the time" / "Always" is never asked; Android doesn't even declare it any more.
  */
-export async function ensurePermissions(askBackground = false): Promise<PermissionResult> {
+export async function ensurePermissions(): Promise<PermissionResult> {
   const fg = await Location.requestForegroundPermissionsAsync();
-  if (fg.status !== 'granted') return 'denied';
-  try {
-    const cur = await Location.getBackgroundPermissionsAsync();
-    if (cur.status === 'granted') return 'background';
-    if (askBackground && cur.canAskAgain !== false && !(await AsyncStorage.getItem(BG_ASKED))) {
-      await AsyncStorage.setItem(BG_ASKED, '1');
-      const bg = await Location.requestBackgroundPermissionsAsync();
-      if (bg.status === 'granted') return 'background';
-    }
-  } catch { /* not available (e.g. Expo Go) */ }
-  return 'foreground';
+  return fg.status === 'granted' ? 'granted' : 'denied';
 }
 
-async function startUpdates() {
-  const opts: Location.LocationOptions = {
+function gpsOptions(): Location.LocationOptions {
+  return {
     // Highest = GNSS at full rate on Android (same as BestForNavigation there) and kCLLocationAccuracyBest
     // on iOS; Apple reserves BestForNavigation for plugged-in navigation apps because of its extra sensor cost.
     accuracy: settings.gpsMode === 'saver' ? Location.Accuracy.High : Location.Accuracy.Highest,
@@ -579,37 +601,71 @@ async function startUpdates() {
     distanceInterval: 0,
     mayShowUserSettingsDialog: true, // Android: offer to turn on high-accuracy location if it is off
   };
-  const bg = await Location.getBackgroundPermissionsAsync().catch(() => null);
-  if (bg?.status === 'granted') {
-    try {
-      await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-        ...opts,
-        activityType: Location.ActivityType.Fitness,
-        pausesUpdatesAutomatically: false,
-        // Background only (both platforms deliver immediately while the app is on screen): fixes are still
-        // taken every second, but handed to JS in batches, so the phone wakes the app every 5 s (15 s in
-        // battery saver) instead of every second. Distance and route are identical.
-        deferredUpdatesInterval: settings.gpsMode === 'saver' ? 15_000 : 5_000,
-        showsBackgroundLocationIndicator: true,
-        foregroundService: {
-          notificationTitle: 'TBDI FitTrack is recording',
-          notificationBody: 'Your activity is being tracked.',
-          notificationColor: '#F2762E',
-        },
-      });
-      return;
-    } catch { /* fall through to foreground watcher */ }
-  }
-  const w = await Location.watchPositionAsync(opts, (l) => { ingest([l]); }, () => {
+}
+
+function taskOptions(): Location.LocationTaskOptions {
+  return {
+    ...gpsOptions(),
+    activityType: Location.ActivityType.Fitness,
+    pausesUpdatesAutomatically: false,
+    // Background only (both platforms deliver immediately while the app is on screen): fixes are still
+    // taken every second, but handed to JS in batches, so the phone wakes the app every 5 s (15 s in
+    // battery saver) instead of every second. Distance and route are identical.
+    deferredUpdatesInterval: settings.gpsMode === 'saver' ? 15_000 : 5_000,
+    showsBackgroundLocationIndicator: true, // iPhone: the blue location indicator while the screen is locked
+    // Android: the foreground service's ongoing notification, in the app language
+    foregroundService: {
+      notificationTitle: translate(settings.language, 'location.fgsTitle'),
+      notificationBody: translate(settings.language, 'location.fgsBody'),
+      notificationColor: '#F2762E',
+    },
+  };
+}
+
+/**
+ * Start the location task. It needs only "While using" access on both platforms, but only while the app is
+ * in the foreground: Android refuses to start the foreground service from the background
+ * (ForegroundServiceStartNotAllowedException, expo-location LocationModule.kt), and iOS doesn't start a
+ * When-In-Use app's updates there (once started in front, allowsBackgroundLocationUpdates keeps them going).
+ * False when it can't run now; the caller falls back to, or keeps, the watcher.
+ */
+async function startTask(): Promise<boolean> {
+  if (!inForeground()) return false;
+  try { await Location.startLocationUpdatesAsync(LOCATION_TASK, taskOptions()); } catch { return false; }
+  if (!session || ending > 0) { await stopUpdates(); return true; } // finished or discarded meanwhile: leave no GPS on
+  watcher?.remove(); // the task delivers the fixes now
+  watcher = null;
+  setMode('task');
+  restartedAt = Date.now(); // the new task gets the watchdog's grace period before it is judged
+  return true;
+}
+
+/** GPS for the recording: the location task, or a plain watcher from the background or if the task fails. */
+async function startUpdates() {
+  if (await startTask()) return;
+  const w = await Location.watchPositionAsync(gpsOptions(), (l) => { ingest([l]); }, () => {
     restartedAt = 0; lastFixAt = 0; // let the watchdog restart it on the next tick
   });
+  if (!session || ending > 0) { w.remove(); return; }
   watcher?.remove(); // never leave a second watcher running
   watcher = w;
+  setMode('watcher');
+}
+
+/**
+ * The fallback watcher gets no fixes once the app leaves the screen: move the recording to the location task
+ * while the app is in front (when it comes back to the screen, and from the watchdog).
+ */
+async function upgradeUpdates() {
+  if (!session || !watcher || restarting || ending > 0) return;
+  restarting = true;
+  try { await startTask(); } catch { /* stays on the watcher */ } finally { restarting = false; }
 }
 
 async function stopUpdates() {
   watcher?.remove();
   watcher = null;
+  setMode(null);
   try {
     if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) {
       await Location.stopLocationUpdatesAsync(LOCATION_TASK);
@@ -750,7 +806,8 @@ export function resume() {
 let discarded: { session: Session; at: number } | null = null;
 export const UNDO_DISCARD_MS = 15_000;
 
-export async function discard() {
+export const discard = () => whileEnding(discardRecording);
+async function discardRecording() {
   Speech.stop();
   stopSteps();
   await stopUpdates();
@@ -784,7 +841,8 @@ export async function undoDiscard(): Promise<boolean> {
   return ok;
 }
 
-export async function finish(): Promise<Activity | null> {
+export const finish = () => whileEnding(finishRecording);
+async function finishRecording(): Promise<Activity | null> {
   Speech.stop();
   stopSteps();
   await stopUpdates();

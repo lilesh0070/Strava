@@ -47,7 +47,7 @@ Wellbeing guidance only, not medical advice.
 
 ## Features
 
-- **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service / iOS background location).
+- **Live recording.** Shows time, distance, and pace or speed while you move. You can pause and resume. Recording keeps going with the screen off (Android foreground service with its "recording" notification / iOS background location with the blue indicator). Only "While using the app" location access is needed; the app never asks for "Allow all the time" / "Always", and the Android app doesn't declare background location at all.
 - **Crash-safe sessions.** The current recording is saved to storage, so if the app is killed it picks up where it left off.
 - **GPS cleanup.** Drops low-accuracy fixes, stale cached fixes, standing-still jitter and multipath jumps.
 - **Live stats on the lock screen (Android).** While recording, a silent notification shows distance, time and pace, refreshed about every 10 seconds (Settings → Recording to turn off).
@@ -60,7 +60,8 @@ Wellbeing guidance only, not medical advice.
   - Every activity, with all its GPS points, is stored as its own file.
   - There is no size limit (AsyncStorage on Android caps the whole database at 6 MB).
   - Writes are crash-safe.
-  - Files are included in Android's automatic backup.
+  - Android's own backup (Google cloud backup and phone-to-phone transfer) brings activities, settings, profile, gear and the wellness log to a new phone. It leaves out a recording in progress and the GitHub / Friends sign-ins, which stay in the old phone's keystore: connect GitHub again (it finds the existing backup), and turn Friends on again (you get a new friend ID, so add your friends again).
+  - Google's cloud backup holds at most 25 MB per app: Android Auto Backup silently stops once app data passes 25 MB (roughly 85 hours of recorded GPS). Phone-to-phone transfer has no cap. To be sure your whole history survives a new phone, use **Settings → Backup** or **GitHub cloud backup**.
   - A recording is only cleared once its activity is safely saved.
   - Existing activities move over automatically on first launch.
 - **Maps.** Uses Leaflet with OpenStreetMap tiles, so no API key is needed.
@@ -78,7 +79,7 @@ Wellbeing guidance only, not medical advice.
   - It checks when the app opens and again when you come back to it (at most every 3 hours), or any time with **Settings → Check for updates**. A banner says when a new version is out, and **Update** downloads it with a progress bar and opens the Android installer. Your data is kept.
   - It reads a small `update.json` that every release ships, from GitHub's download CDN. That avoids the GitHub API's 60-requests-per-hour-per-IP limit, which a whole office on one Wi-Fi would hit. Older releases fall back to the API.
   - The APK's size is checked before installing, so a broken download never reaches the installer. An earlier complete download is reused. If downloading fails there is an "Open download page" button.
-  - **Test builds:** releases marked *pre-release* are only offered to phones with **Settings → Test builds** on.
+  - **Test builds:** releases marked *pre-release* are only offered to phones with **Settings → Test builds** on (the switch is hidden: tap the "TBDI FitTrack x.y.z" line in Settings 7 times to show it).
   - **OTA:** the app can apply JS updates published with `eas update` ("Restart" button), but OTA is not configured yet (see *Releasing an update*), so today every fix ships as a release.
 - **Precise live tracking.**
   - Full GPS (highest accuracy: best-for-navigation on Android, "Best" on iPhone) every second (every 3 s in battery saver) with no distance filter, so the live position never goes stale, even when you stand still.
@@ -93,7 +94,8 @@ Wellbeing guidance only, not medical advice.
   - Elevation gain comes from a smoothed altitude with an 8 m hysteresis; altitude the chip flags as poor (vertical accuracy > 30 m) is dropped.
   - The ±m accuracy chip re-checks every second and switches to "Finding GPS…" as soon as fixes stop.
   - Detects approximate-only permission or location turned off, and offers the fix (Android: in-app dialogs).
-  - A watchdog restarts GPS if fixes stop arriving during a recording.
+  - A watchdog restarts GPS if fixes stop arriving during a recording (only while the app is on screen: Android doesn't allow starting the foreground service from the background).
+  - If the screen-off recording can't start (the app was relaunched in the background, or the service was refused), GPS falls back to an on-screen-only watcher, the Record screen says "Keep the app open while recording", and the recording moves back to the foreground service as soon as the app is on screen again.
   - A GPS-quality gate before Start warns if the signal is weak.
 - **Live stats.** Pace now, average pace, the current lap, a lap button with voice summaries, and max speed.
 - **Pace coach.** Set a target like 5:30/km and get voice nudges when you drift ±15 s.
@@ -138,7 +140,7 @@ Wellbeing guidance only, not medical advice.
 - **Share this app.** Settings → Share this app sends a link to the newest APK (from an iPhone: the release page with the APK and the .ipa).
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports only add what is missing: they never delete anything and never overwrite activities, gear or a profile already on the phone.
 
-Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and your week/month/total km in Firebase).
+Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and your week/month/total km in Firebase). Android's own backup, when it is turned on in the phone's settings, also copies the app's data to your Google account (see *Your data is kept safe* above).
 
 ## Releasing an update (all on GitHub)
 
@@ -150,7 +152,7 @@ Everything runs on GitHub. No Expo account and no computer are needed, and it wo
    in the Firebase console (project `stribe-a8108`, Firestore → Rules → paste → Publish). Phones on the new
    version write the new fields; until the rules allow them they fall back to the weekly fields only.
 1. Open **GitHub → Actions → Release APK → Run workflow**, with *Use workflow from* left on `main`.
-2. Type the new version and, optionally, release notes (shown in the app's update screen). The version must be newer than `expo.version` in `app.json` (a pre-release counts too: after pre-release 1.3.9, promote it or release 1.3.10). Tick **prerelease** for a test build that only phones with *Test builds* on are offered.
+2. Type the new version and, optionally, release notes (shown in the app's update screen). The version must be newer than `expo.version` in `app.json` (a pre-release counts too: after pre-release 1.3.9, promote it or release 1.3.10). Tick **prerelease** for a test build that only phones with *Test builds* on are offered (hidden switch: 7 taps on the version line in Settings).
 3. The workflow then does the rest:
    - runs the unit tests and the typecheck (`npm test && npx tsc --noEmit`); a failure stops the run before anything is bumped;
    - bumps `expo.version` and `expo.android.versionCode` in `app.json`, then commits and tags;
@@ -186,12 +188,36 @@ Create a key once with `keytool -genkeypair -keystore release.jks -storetype PKC
 -keyalg RSA -keysize 4096 -validity 36500 -dname "CN=TBDI FitTrack, O=TBDI, C=IN"` and keep the file and
 password somewhere safe: **if the key is lost, phones can't update again without uninstalling.**
 
-Switching keys: Android only installs an update signed with the same key, so each phone reinstalls once.
-Every release writes the signing certificate's SHA-256 fingerprint into the app and into `update.json`
-(step *Signing fingerprint*); from v1.3.10 on the app notices a key change and shows the steps (back up,
-download the new APK, uninstall, install, restore) instead of a failing installer. So: release v1.3.10 or
-newer with the old key first, let phones update to it, then add the secrets and release the next version.
-The run log shows the fingerprint it signed with.
+Switching keys needs **no uninstall**: the workflow uses APK Signature Scheme v3 key rotation. Gradle always
+signs with the debug key; with the secrets set, step *Sign APK with key rotation*
+([`scripts/sign-apk-rotation.sh`](scripts/sign-apk-rotation.sh), `apksigner` from the runner's newest
+build-tools) then:
+1. makes a lineage debug key → your key with `apksigner rotate` (default capabilities, **no rollback**);
+2. re-signs the APK: v2 signature with the debug key, v3 signature with your key plus the lineage from
+   Android 9 (`--rotation-min-sdk-version 28`);
+3. checks with `apksigner verify -v --print-certs` and `apksigner lineage` that Android 7–8 see only the debug
+   key, Android 9+ see your key with the lineage debug key → your key, nothing else in the APK changed and
+   the native libraries are still 16 KB aligned. Any failure (or a wrong password, alias or keystore) stops
+   the run before anything is published. Passwords only reach `keytool`/`apksigner` as environment variables.
+
+So phones update in place and keep their data. Android 9+ checks v3: the lineage proves your key takes over
+from the debug key, and from then on those phones accept only your key (an APK signed with the debug key
+alone can no longer replace the app). Android 7–8 only check v2, which stays the debug key, so they update in
+place as well (but stay open to debug-key look-alikes). Keep it that way: keep the debug key as the first
+signer, never let Gradle sign with your key directly (`STRIDE_KEYSTORE_FILE` stays unset in CI) and never pass
+`--set-rollback true`.
+
+Every release writes the fingerprint of the key it is effectively signed with into the app (`extra.signer`)
+and into `update.json` (`"signer"`; with rotation also `"lineage": [debug key, your key]`). The app installs
+an update in place when its own key is the signer or in the lineage, and shows the one-time reinstall steps
+(back up, download, uninstall, install, restore) only for a key change **without** a lineage. The app reads
+`lineage` from the first release after v1.3.11; v1.3.10 and v1.3.11 only compare `signer` and would show those
+steps for the switch (versions before v1.3.10 just install it). So:
+1. release a version that reads `lineage`, still with the debug key, and let phones update to it;
+2. run **Actions → Signing self-test → Run workflow**: it re-signs the latest release APK with a throwaway key
+   using the same script and checks the v2/v3 signers and the lineage, so the commands are proven on a runner
+   before your key is involved (no secrets needed; it publishes nothing);
+3. add the four secrets and release the next version. The run log shows both fingerprints.
 
 Optional: OTA JS updates via `eas update` need an Expo account and `npx eas-cli@latest update:configure` (adds `updates.url` and `extra.eas.projectId` to `app.json`). They only reach phones running a version released after that; today's builds have OTA off, so ship fixes as a release.
 
@@ -288,7 +314,7 @@ src/lib/health.ts        Wellness score, water goal, streaks, insights, wellness
 src/lib/breaks.ts        Stretch routine and break-reminder schedule (unit-tested)
 src/lib/strings.ts       English + Hindi texts (every key in both; strings.test.ts checks it); i18n.tsx: useT, sportName, prLabel, badgeTitle
 modules/instagram-story  Local Expo module (Android): send a sticker to Instagram's story editor
-plugins/withReleaseSigning.js   Release signing from CI secrets
+plugins/withReleaseSigning.js   Release signing for local builds (CI signs with the debug key, then scripts/sign-apk-rotation.sh)
 plugins/withAsyncStorageSize.js Raises Android's AsyncStorage size limit
 firestore.rules          Who may read/write what in Firebase (publish after every change)
 scripts/friends-rules.test.ts   Friends + rules test against the Firebase emulators
@@ -339,6 +365,14 @@ Read this before touching the parts below; each rule exists because breaking it 
   `DistanceState` field must be optional and the code must work when it is missing.
 - If you change what `bestEffort()` returns, bump `EFFORTS_V` in `src/lib/storage.ts` so the cached
   efforts in list summaries are rebuilt once.
+- Screen-off recording is the location task (`startTask()` in `tracker.ts`: `startLocationUpdatesAsync` with
+  `foregroundService` and `showsBackgroundLocationIndicator`). It needs only foreground ("While using")
+  permission, but only when started while the app is in the foreground: Android throws
+  `ForegroundServiceStartNotAllowedException` from the background, and iOS doesn't start a When-In-Use app's
+  updates there. So never start or restart GPS from the background (the watchdog returns early there);
+  `watchPositionAsync` is only the fallback, and `upgradeUpdates()` moves the recording back to the task once
+  the app is on screen. Don't ask for background permission: `ACCESS_BACKGROUND_LOCATION` is in
+  `android.blockedPermissions` in `app.json` (Play requires a prominent disclosure and review for it).
 
 **Texts and languages**
 - Every user-facing string goes through `t('key')` with an English and a Hindi value in `src/lib/strings.ts`
@@ -368,6 +402,13 @@ Read this before touching the parts below; each rule exists because breaking it 
   read it in `board()` with a default (friends on old versions don't send it), show it in
   `src/app/friends.tsx`, add it to `device()` in `scripts/friends-rules.test.ts`, and update the privacy note
   under *Friends & leaderboard*.
+
+**Storage and Android backup**
+- Android's backup and phone-to-phone transfer copy only what `plugins/withBackupRules.js` lists: the
+  `tbdi-data/` folder of `src/lib/blobStore.ts` (without the live `session.json`) and the AsyncStorage
+  database. Data kept anywhere else (another folder, SharedPreferences) never reaches a new phone. SecureStore
+  must stay out: its keystore keys never leave the old phone, so a copy can't be decrypted. Changing the rules
+  is native config and needs a new release.
 
 **Map**
 - Leaflet is inlined from `src/lib/leafletSrc.ts` (generated: don't edit it, don't go back to a CDN `<script>`,
@@ -419,8 +460,9 @@ Branches and releases: work on a branch → pull request → merge into `main` �
 
 Known gaps (good next steps):
 
-- Android release APKs are signed with the public React Native debug key unless the `ANDROID_KEYSTORE_*`
-  secrets are set; use a private key before sharing widely (switching keys needs one reinstall).
+- The v2 signature always uses the public React Native debug key (Android 7-8 verify that one); with the
+  `ANDROID_KEYSTORE_*` secrets set, v3 key rotation moves Android 9+ phones to the private key in place
+  (see *Signing*: no reinstall). Run *Signing self-test* before adding the secrets.
 - iPhone builds are only for AltStore/SideStore; TestFlight/App Store needs an Apple Developer account
   and an EAS (or Xcode) signing setup.
 - Direct Instagram story stickers on iPhone aren't implemented (the sticker is saved to the gallery and

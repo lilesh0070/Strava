@@ -32,10 +32,17 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
         "REQUEST_INSTALL_PACKAGES"
+      ],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
       ],
       "predictiveBackGestureEnabled": false,
       "versionCode": 15
@@ -49,8 +56,8 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "TBDI FitTrack uses your location to record your route while an activity is running, even when the screen is off.",
-          "locationWhenInUsePermission": "TBDI FitTrack uses your location to record your route.",
-          "isAndroidBackgroundLocationEnabled": true,
+          "locationWhenInUsePermission": "TBDI FitTrack uses your location to record your route, also while the screen is locked during a recording.",
+          "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": true,
           "locationAlwaysPermission": "TBDI FitTrack uses your location to record your route while an activity is running, even when the screen is off.",
           "locationFullAccuracyPermission": "TBDI FitTrack needs your precise location to measure your route and distance accurately."
@@ -84,15 +91,19 @@
       [
         "expo-notifications",
         {
-          "enableRemoteNotifications": false
+          "enableRemoteNotifications": false,
+          "icon": "./assets/notification-icon.png",
+          "color": "#F2762E"
         }
       ],
       "./plugins/withReleaseSigning",
       "./plugins/withAsyncStorageSize",
+      "./plugins/withBackupRules",
       [
         "expo-secure-store",
         {
-          "faceIDPermission": false
+          "faceIDPermission": false,
+          "configureAndroidBackup": false
         }
       ],
       [

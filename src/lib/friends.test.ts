@@ -87,3 +87,26 @@ test('share: rules published before v1.3.9 reject month/all-time fields → week
   assert.equal(writes[2].monthKm, 20);
   assert.equal(writes[2].totalKm, 100);
 });
+
+test('enable: a friend ID restored without its sign-in (Android backup to a new phone) is replaced, not reused', async () => {
+  const { createFriends } = await import('./friends.ts');
+  const codes: Record<string, { uid: string }> = { 'STR-OLD22': { uid: 'old-phone' } };
+  const writes: Record<string, unknown>[] = [];
+  const client = {
+    uid: async () => 'new-phone', signIn: async () => 'new-phone',
+    get: async (path: string) => (path.startsWith('codes/') ? codes[path.slice(6)] ?? null : null),
+    create: async (_col: string, id: string, data: { uid: string }) => { codes[id] = data; },
+    set: async (_path: string, doc: Record<string, unknown>) => { writes.push(doc); },
+  } as unknown as Parameters<typeof createFriends>[0]['client'];
+  let kvVal: string | null = JSON.stringify({ code: 'STR-OLD22' }); // restored from the old phone's AsyncStorage
+  const stats = { name: 'Asha', weekKm: 5, weekStart: 0, monthKm: 20, monthStart: 0, totalKm: 100 };
+  const f = createFriends({ client, kv: { get: async () => kvVal, set: async (v: string | null) => { kvVal = v; } }, stats: async () => stats });
+  const code = await f.enable();
+  assert.notEqual(code, 'STR-OLD22');
+  assert.equal(codes[code].uid, 'new-phone');
+  assert.equal(JSON.parse(kvVal!).code, code);
+  assert.equal(writes.at(-1)?.code, code);
+  // its own ID is kept from then on
+  assert.equal(await f.enable(), code);
+  assert.equal(Object.keys(codes).length, 2);
+});

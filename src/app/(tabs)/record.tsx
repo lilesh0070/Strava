@@ -34,7 +34,21 @@ const useTracker = () => {
   return { session: tracker.getSession(), fix: tracker.getLastFix() };
 };
 
-function KeepAwake() { useKeepAwake(); return null; }
+/**
+ * Keeps the display on, if the user turned that on (Settings → Recording, off by default: a lit screen
+ * costs more battery than GPS and takes pocket taps). Mounted only while this tab is focused, so the
+ * setting is read again every time the user comes back from Settings.
+ */
+function KeepAwake() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    getSettings().then((s) => { if (live) setOn(s.keepScreenOn); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  return on ? <ScreenOn /> : null;
+}
+function ScreenOn() { useKeepAwake(); return null; }
 /** Stable empty route, so the map doesn't redraw every second before Start. */
 const NO_SEGMENTS: never[] = [];
 const MAP_STYLE = { flex: 1, borderRadius: 26 } as const;
@@ -129,15 +143,14 @@ export default function Record() {
     let cancelled = false;
     const checkPrecision = () => tracker.locationPrecision().then((p) => { if (!cancelled) setPrecision(p); });
     // No OS dialog just for opening the tab: when permission was never asked, a card in the map explains and
-    // offers it; "Allow all the time" is asked once, on Start.
-    const check = () => tracker.permissionStatus().then(async (st) => {
+    // offers it. "While using the app" is all a recording needs, also with the screen off (the tracker starts
+    // it from the open app), so "Allow all the time" is never asked.
+    const check = () => tracker.permissionStatus().then((st) => {
       if (cancelled) return;
       if (st !== 'granted') { setPerm(st === 'denied' ? 'denied' : 'unasked'); return; }
-      // already granted: read foreground vs background without any request, so an Android user who kept
-      // "Approximate" is not shown the upgrade dialog again every time the app comes back to the front
-      const p = await tracker.grantedLevel();
-      if (cancelled) return;
-      setPerm(p);
+      // already granted: no request, so an Android user who kept "Approximate" is not shown the upgrade
+      // dialog again every time the app comes back to the front
+      setPerm('granted');
       checkPrecision();
       tracker.setWarmUp(true);
     });
@@ -148,7 +161,7 @@ export default function Record() {
     return () => { cancelled = true; tracker.setWarmUp(false); clearInterval(id); app.remove(); };
   }, []));
   const allowLocation = async () => {
-    const p = await tracker.ensurePermissions(false);
+    const p = await tracker.ensurePermissions();
     setPerm(p);
     if (p === 'denied') return;
     tracker.locationPrecision().then(setPrecision).catch(() => undefined);
@@ -163,6 +176,9 @@ export default function Record() {
   // age from when the fix arrived, not its GPS timestamp, so a skewed GPS clock can't fake a signal
   const health = gpsHealth(fix ? { ...fix, t: tracker.getLastFixAt() } : null, now);
   const gpsOk = health === 'good' && precision === 'precise';
+  // the recording runs on the fallback GPS watcher (its screen-off location task couldn't start yet): it gets no
+  // fixes while the app is off screen, until the tracker moves it to the task
+  const onWatcher = !!active && tracker.trackingMode() === 'watcher';
   const cur = tracker.steadySpeed(); // held steady: no flicker at a constant pace
   const laps = active?.laps ?? [];
   // the open lap always starts at the last press, so the display changes the moment Lap is tapped
@@ -223,16 +239,14 @@ export default function Record() {
 
   /** Permission, precision and GPS-quality checks before recording. Resolves false if it should not start yet. */
   const prepareStart = async () => {
-    // permission may have changed in system Settings since this tab was focused; Start is also where
-    // "Allow all the time" is requested (once)
+    // permission may have changed in system Settings since this tab was focused
     let p = perm;
     let pr = precision;
-    if (p !== 'background') {
-      const before = p;
-      p = await tracker.ensurePermissions(true);
+    if (p !== 'granted') {
+      p = await tracker.ensurePermissions();
       setPerm(p);
       // first grant happens right here: precision was never read (and the user may have picked Approximate)
-      if (p !== 'denied' && before !== 'foreground') {
+      if (p === 'granted') {
         pr = await tracker.locationPrecision();
         setPrecision(pr);
         tracker.setWarmUp(true);
@@ -313,7 +327,8 @@ export default function Record() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {active?.status === 'recording' && <KeepAwake />}
+      {/* on the fallback watcher GPS stops with the screen, so the screen stays on whatever the setting says */}
+      {active?.status === 'recording' && (onWatcher ? <ScreenOn /> : focused && <KeepAwake />)}
 
       <View style={{ flex: 1, margin: 16, marginTop: insets.top + 8, borderRadius: 32, padding: 6, backgroundColor: C.bg, boxShadow: S.inset }}>
         <RouteMap segments={active?.segments ?? NO_SEGMENTS} current={fix} follow paused={!focused} style={MAP_STYLE}
@@ -346,13 +361,13 @@ export default function Record() {
           </Pressable>
           <SettingsButton />
         </View>
-        {(perm === 'foreground' || mapOffline) && (
+        {(onWatcher || mapOffline) && (
           <View style={{ position: 'absolute', bottom: 16, left: 16, right: 16, alignItems: 'center', gap: 6 }}>
             {mapOffline && pill(<>
               <MaterialCommunityIcons name="wifi-off" size={13} color={C.muted} />
               <Text style={{ color: C.muted, fontSize: 11, flexShrink: 1 }} numberOfLines={2}>{t('map.offline')}</Text>
             </>)}
-            {perm === 'foreground' && pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
+            {onWatcher && pill(<Text style={{ color: C.muted, fontSize: 11 }}>{t('rec.keepOpen')}</Text>)}
           </View>
         )}
       </View>

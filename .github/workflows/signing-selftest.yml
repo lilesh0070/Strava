@@ -1,0 +1,154 @@
+# Proves the release's key-rotation signing on a real GitHub runner without the real key. It downloads the
+# latest release APK, makes a throwaway key, runs scripts/sign-apk-rotation.sh (the script "Release APK" runs
+# when the ANDROID_KEYSTORE_* secrets are set) and then checks on its own that the result has a v2 signature by
+# the debug key (Android 7-8) and a v3 signature by the throwaway key with the lineage debug key -> throwaway key
+# and no rollback (Android 9+). Nothing is published and the throwaway key is discarded with the runner.
+# Run it (Actions -> Signing self-test -> Run workflow) before adding the signing secrets.
+name: Signing self-test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**'] # branches only: tag pushes skip path filters and would always run it
+    paths:
+      - .github/workflows/signing-selftest.yml
+      - scripts/sign-apk-rotation.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signing-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tools
+        run: |
+          W="$RUNNER_TEMP/selftest"; mkdir -p "$W"; echo "W=$W" >> "$GITHUB_ENV"
+          BT=$(for d in "$ANDROID_HOME"/build-tools/*/; do
+            d=${d%/} && d=${d##*/} && [[ $d =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "$d"
+          done | sort -V | tail -n 1 || true)
+          [ -n "$BT" ] || { echo "::error::No Android build-tools on this runner (ANDROID_HOME=$ANDROID_HOME)"; exit 1; }
+          echo "Installed build-tools: $(cd "$ANDROID_HOME/build-tools" && echo *)"
+          echo "apksigner $("$ANDROID_HOME/build-tools/$BT/apksigner" version) from build-tools $BT"
+          # for the independent checks below; the script finds its own copy the way it does in a release
+          echo "BT=$BT" >> "$GITHUB_ENV"
+          echo "CHECK_APKSIGNER=$ANDROID_HOME/build-tools/$BT/apksigner" >> "$GITHUB_ENV"
+
+      - name: Download the latest release APK
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          curl -fsSL --retry 3 -o "$W/update.json" "https://github.com/$REPO/releases/latest/download/update.json"
+          URL=$(node -p 'require(process.argv[1]).url' "$W/update.json")
+          SHA=$(node -p 'require(process.argv[1]).sha256 || ""' "$W/update.json")
+          case "$URL" in
+            "https://github.com/$REPO/releases/download/"*.apk) ;;
+            *) echo "::error::Unexpected APK URL in update.json: $URL"; exit 1 ;;
+          esac
+          curl -fsSL --retry 3 -o "$W/release.apk" "$URL"
+          if [ -n "$SHA" ]; then echo "$SHA  $W/release.apk" | sha256sum -c -; fi
+          echo "Testing with $URL"
+
+      - name: Debug key (the file `expo prebuild` puts in android/app)
+        run: |
+          V=$(node -p 'require("./package-lock.json").packages["node_modules/expo"].version')
+          npm pack "expo@$V" --pack-destination "$W" --silent
+          tar -xzf "$W/expo-$V.tgz" -C "$W" package/template.tgz
+          mkdir -p "$W/template"
+          tar -xzf "$W/package/template.tgz" -C "$W/template" package/android/app/debug.keystore
+          KS="$W/template/package/android/app/debug.keystore"
+          FP=$(keytool -list -v -keystore "$KS" -alias androiddebugkey -storepass android | awk '/SHA256:/{print $2; exit}')
+          echo "Debug key from expo@$V: $FP"
+          echo "OLD_KEYSTORE=$KS" >> "$GITHUB_ENV"
+          echo "OLD_FP=$FP" >> "$GITHUB_ENV"
+
+      - name: Installed phones check the debug key (v2 signature of the released APK)
+        run: |
+          HEX=$(echo "$OLD_FP" | tr -d ':' | tr 'A-F' 'a-f')
+          OUT=$("$CHECK_APKSIGNER" verify --print-certs --max-sdk-version 27 "$W/release.apk")
+          echo "$OUT" | grep -v '^WARNING' || true
+          grep -q "certificate SHA-256 digest: $HEX" <<<"$OUT" ||
+            { echo "::error::The released APK's v2 signer is not the template's debug key"; exit 1; }
+
+      - name: Throwaway release key
+        run: |
+          PASS=$(openssl rand -hex 24)
+          echo "::add-mask::$PASS"
+          echo "NEW_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          export NEW_KEYSTORE_PASSWORD=$PASS
+          keytool -genkeypair -keystore "$W/throwaway.p12" -storetype PKCS12 -alias throwaway -keyalg RSA -keysize 4096 \
+            -validity 12000 -dname "CN=TBDI FitTrack signing self-test (throwaway)" \
+            -storepass:env NEW_KEYSTORE_PASSWORD -keypass:env NEW_KEYSTORE_PASSWORD
+          FP=$(keytool -list -v -keystore "$W/throwaway.p12" -alias throwaway -storepass:env NEW_KEYSTORE_PASSWORD | awk '/SHA256:/{print $2; exit}')
+          echo "Throwaway key: $FP"
+          echo "NEW_FP=$FP" >> "$GITHUB_ENV"
+
+      - name: Rotate, sign and verify (scripts/sign-apk-rotation.sh, as in Release APK)
+        run: |
+          set -o pipefail # the script's exit code, not tee's, decides the step
+          OLD_KEYSTORE="$OLD_KEYSTORE" NEW_KEYSTORE="$W/throwaway.p12" NEW_KEY_ALIAS=throwaway \
+          EXPECT_SIGNER="$NEW_FP" EXPECT_LINEAGE="$OLD_FP,$NEW_FP" LINEAGE_FILE="$W/rotation.lineage" \
+            bash scripts/sign-apk-rotation.sh "$W/release.apk" "$W/rotated.apk" 2>&1 | tee "$W/sign.log"
+          if grep -qF "$NEW_KEYSTORE_PASSWORD" "$W/sign.log"; then echo "::error::The key password appeared in the output"; exit 1; fi
+
+      - name: Independent checks of the signed APK
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          OLD=$(echo "$OLD_FP" | tr -d ':' | tr 'A-F' 'a-f')
+          NEW=$(echo "$NEW_FP" | tr -d ':' | tr 'A-F' 'a-f')
+          signers() { grep -v 'in lineage' | sed -nE 's/^.*certificate SHA-256 digest: *([0-9a-f]{64}).*$/\1/p' | sort -u | paste -sd, -; }
+          ALL=$("$CHECK_APKSIGNER" verify -v --print-certs "$W/rotated.apk") || fail "apksigner verify failed"
+          grep -q '^Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$ALL" || fail "no v2 signature"
+          grep -q '^Verified using v3 scheme (APK Signature Scheme v3): true' <<<"$ALL" || fail "no v3 signature"
+          A78=$("$CHECK_APKSIGNER" verify --print-certs --max-sdk-version 27 "$W/rotated.apk" | signers) || fail "no Android 7-8 signature"
+          [ "$A78" = "$OLD" ] || fail "Android 7-8 would see signer(s) $A78, expected only the debug key $OLD"
+          A9=$("$CHECK_APKSIGNER" verify --print-certs --min-sdk-version 28 "$W/rotated.apk" | signers) || fail "no Android 9+ signature"
+          [ "$A9" = "$NEW" ] || fail "Android 9+ would see signer(s) $A9, expected only the throwaway key $NEW"
+          LIN=$("$CHECK_APKSIGNER" lineage --in "$W/rotated.apk" --print-certs -v) || fail "the signed APK has no lineage"
+          echo "$LIN"
+          CHAIN=$(sed -nE 's/^Signer #[0-9]+ in lineage certificate SHA-256 digest: *([0-9a-f]{64}).*$/\1/p' <<<"$LIN" | paste -sd, -)
+          [ "$CHAIN" = "$OLD,$NEW" ] || fail "lineage is $CHAIN, expected debug key -> throwaway key"
+          if grep -Eiq 'rollback capability *: *true' <<<"$LIN"; then fail "an old key has the rollback capability"; fi
+          "$ANDROID_HOME/build-tools/$BT/zipalign" -c -P 16 4 "$W/rotated.apk" > /dev/null || fail "native libraries are not 16 KB aligned"
+          {
+            echo "### Key rotation works with build-tools $BT"
+            echo "- Android 7-8 (v2): debug key \`$OLD_FP\`"
+            echo "- Android 9+ (v3): throwaway key \`$NEW_FP\`, lineage debug key -> throwaway key, no rollback"
+            echo "- Native libraries stay 16 KB aligned; contents unchanged"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: The script stops with a clear error and prints no password
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          run() { # <log> [VAR=value ...]: the script with the self-test's keys, expecting it to fail
+            local log=$1; shift
+            if env OLD_KEYSTORE="$OLD_KEYSTORE" NEW_KEYSTORE="$W/throwaway.p12" NEW_KEY_ALIAS=throwaway "$@" \
+              bash scripts/sign-apk-rotation.sh "$W/release.apk" "$W/bad.apk" > "$log" 2>&1; then
+              fail "the script succeeded although it should have failed ($*)"
+            fi
+            sed 's/::error::/(expected) /' "$log"
+            grep -q '::error::' "$log" || fail "the script failed without a clear error ($log)"
+            [ ! -e "$W/bad.apk" ] || fail "the failed run left an APK behind"
+          }
+          WRONG="wrong-$(openssl rand -hex 8)"
+          run "$W/wrong-password.log" NEW_KEYSTORE_PASSWORD="$WRONG"
+          if grep -qF "$WRONG" "$W/wrong-password.log"; then fail "the script printed the password"; fi
+          run "$W/wrong-alias.log" NEW_KEY_ALIAS=nope
+          run "$W/wrong-signer.log" EXPECT_SIGNER="$OLD_FP"
+          run "$W/same-key.log" NEW_KEYSTORE="$OLD_KEYSTORE" NEW_KEY_ALIAS=androiddebugkey NEW_KEYSTORE_PASSWORD=android

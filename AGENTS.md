@@ -76,5 +76,6 @@ The rules that matter most:
   activities, gear, profile fields or wellness days already on the phone (a file restore does apply the
   backup's settings; the GitHub restore skips settings). Save settings with `updateSettings()`, not `saveSettings()`.
 - Signing: never commit a keystore or its passwords; they live in the `ANDROID_KEYSTORE_*` repository secrets.
-  A key change forces each phone to reinstall once (README → Signing); keep `signer` in `update.json`.
+  The key switch uses APK Signature Scheme v3 rotation (README → Signing): no reinstall; keep `signer` and
+  `lineage` in `update.json`, and run the *Signing self-test* workflow after changing scripts/sign-apk-rotation.sh.
 - `docs.expo.dev` may be unreachable from cloud sessions; check APIs in `node_modules/<package>/build/*.d.ts`.
