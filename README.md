@@ -60,7 +60,7 @@ Once installed, new versions arrive through **Settings → Check for updates** i
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.
 - **Original app icon** and splash screen (light and dark).
 - **Feed search and sport filter**, a 3-2-1 start countdown, haptics at every km, and a battery-saver GPS mode.
-- **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports merge with existing data and never delete anything.
+- **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports only add what is missing: they never delete anything and never overwrite activities, gear or a profile already on the phone.
 
 All data is stored on the device with AsyncStorage.
 
@@ -98,6 +98,7 @@ Optional: OTA JS updates via `eas update` still work if you set up EAS, but noth
 - The token is kept in the phone's encrypted keystore.
 - It backs up automatically after every activity.
 - **Restore** merges the backup into a new phone.
+- Connecting a phone to an existing backup is safe: its first upload merges what is already in the cloud before saving, so a new phone can't replace your history.
 
 ## Project layout
 
@@ -126,6 +127,7 @@ src/components/Neu.tsx   NeuCard, NeuButton, NeuSwitch, IconWell, NeuTile…
 
 - `npm test`: unit tests for the geo maths and coach helpers
 - `npm run typecheck`
+- `npm run lint`: ESLint via `expo lint`
 
 ## Roadmap ideas
 
