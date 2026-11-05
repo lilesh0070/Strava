@@ -6,6 +6,8 @@ export type Point = {
   alt: number | null;
   t: number; // epoch ms
   acc: number | null; // horizontal accuracy in metres
+  /** Recorded distance (m) when this point was stored; absent in activities from older versions. */
+  d?: number;
 };
 
 export type Split = { km: number; distanceM: number; durationSec: number };
@@ -32,9 +34,16 @@ export function acceptPoint(prev: Point | undefined, next: Point, maxSpeedMs = 4
   return speed <= maxSpeedMs;
 }
 
+/**
+ * Distance between consecutive points of one segment: the recorded distance when both carry it (the
+ * tracker's speed-integrated / smoothed total, which the headline shows), else the chord. Keeps splits,
+ * best efforts and charts in step with the headline distance.
+ */
+export const pointGap = (a: Point, b: Point): number => (a.d != null && b.d != null ? Math.max(0, b.d - a.d) : haversine(a, b));
+
 export function segmentDistance(seg: Point[]): number {
   let d = 0;
-  for (let i = 1; i < seg.length; i++) d += haversine(seg[i - 1], seg[i]);
+  for (let i = 1; i < seg.length; i++) d += pointGap(seg[i - 1], seg[i]);
   return d;
 }
 
@@ -79,16 +88,19 @@ export function elevationGain(segments: Point[][], threshold = 8): number {
   return gain;
 }
 
-/** Cumulative distance (m) and moving time (s) per point, gaps between segments excluded. */
+/**
+ * Cumulative distance (m) and moving time (s) per point, gaps between segments excluded. Uses the recorded
+ * distance when every point carries it (so the total equals the headline), else re-measures the chords.
+ */
 export function cumulative(segments: Point[][]): { d: number[]; s: number[]; alt: (number | null)[] } {
   const d: number[] = [], s: number[] = [], alt: (number | null)[] = [];
+  const recorded = segments.every((seg) => seg.every((p) => p.d != null));
   let dist = 0, time = 0;
   for (const seg of segments) {
     for (let i = 0; i < seg.length; i++) {
-      if (i > 0) {
-        dist += haversine(seg[i - 1], seg[i]);
-        time += (seg[i].t - seg[i - 1].t) / 1000;
-      }
+      if (recorded) dist = Math.max(dist, seg[i].d!);
+      else if (i > 0) dist += haversine(seg[i - 1], seg[i]);
+      if (i > 0) time += (seg[i].t - seg[i - 1].t) / 1000;
       d.push(dist); s.push(time); alt.push(seg[i].alt);
     }
   }
@@ -124,18 +136,23 @@ export function splits(segments: Point[][], unitM = 1000): Split[] {
   return out;
 }
 
-/** Fastest time (s) to cover `target` metres anywhere in the activity, or null. */
+/**
+ * Fastest time (s) to cover `target` metres continuously, or null. Each segment is searched on its own: a
+ * pause (rest between intervals) breaks the effort, so 5 × 1 km with rests is not a 5 km best.
+ */
 export function bestEffort(segments: Point[][], target: number): number | null {
-  const { d, s } = cumulative(segments);
-  if (!d.length || d[d.length - 1] < target) return null;
   let best = Infinity;
-  let j = 0;
-  for (let i = 0; i < d.length; i++) {
-    while (j < d.length && d[j] - d[i] < target) j++;
-    if (j >= d.length) break;
-    // interpolate the end point for a fair comparison
-    const end = timeAtDistance(d, s, d[i] + target);
-    best = Math.min(best, end - s[i]);
+  for (const seg of segments) {
+    const { d, s } = cumulative([seg]);
+    if (!d.length || d[d.length - 1] - d[0] < target) continue;
+    let j = 0;
+    for (let i = 0; i < d.length; i++) {
+      while (j < d.length && d[j] - d[i] < target) j++;
+      if (j >= d.length) break;
+      // interpolate the end point for a fair comparison
+      const end = timeAtDistance(d, s, d[i] + target);
+      best = Math.min(best, end - s[i]);
+    }
   }
   return Number.isFinite(best) ? best : null;
 }
@@ -143,6 +160,7 @@ export function bestEffort(segments: Point[][], target: number): number | null {
 // ---------- formatting ----------
 
 export function fmtDuration(sec: number): string {
+  if (!Number.isFinite(sec)) return '–:––';
   sec = Math.max(0, Math.round(sec));
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   const mm = String(m).padStart(h ? 2 : 1, '0'), ss = String(s).padStart(2, '0');
@@ -150,19 +168,21 @@ export function fmtDuration(sec: number): string {
 }
 
 export function fmtKm(m: number): string {
+  if (!Number.isFinite(m)) return '–';
+  m = Math.max(0, m);
   return (m / 1000).toFixed(m < 10000 ? 2 : 1);
 }
 
 /** Pace as min:sec per km. */
 export function fmtPace(distanceM: number, sec: number): string {
-  if (distanceM < 10 || sec <= 0) return '–:––';
+  if (!Number.isFinite(distanceM) || !Number.isFinite(sec) || distanceM < 10 || sec <= 0) return '–:––';
   const p = sec / (distanceM / 1000);
   if (p > 60 * 60) return '–:––';
   return fmtDuration(p);
 }
 
 export function fmtSpeed(distanceM: number, sec: number): string {
-  if (sec <= 0) return '0.0';
+  if (!Number.isFinite(distanceM) || !Number.isFinite(sec) || sec <= 0) return '0.0';
   return ((distanceM / sec) * 3.6).toFixed(1);
 }
 

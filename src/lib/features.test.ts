@@ -16,6 +16,10 @@ test('calories', () => {
   assert.equal(metFor('run', 10), 11);
   assert.equal(estimateCalories('run', 5000, 1800, 70), 385); // 11 MET × 70 kg × 0.5 h
   assert.equal(estimateCalories('run', 5000, 0, 70), 0);
+  // the same speed labelled walk or run burns about the same (Compendium: walking 7.2-8 km/h ≈ 7-8.3 MET)
+  assert.ok(Math.abs(metFor('walk', 7.5) - metFor('run', 7.5)) <= 1.5, `${metFor('walk', 7.5)} vs ${metFor('run', 7.5)}`);
+  assert.ok(metFor('walk', 6.5) > metFor('walk', 5), 'a brisk walk burns more than a stroll');
+  assert.ok(metFor('hike', 6) > metFor('hike', 2));
 });
 
 test('parse duration', () => {
@@ -52,6 +56,26 @@ test('interval workout steps advance by time and distance', () => {
   while (!p.done && guard++ < 100) { d += 1000; t += 1000; ({ p } = advance(w, p, d, t)); }
   assert.ok(p.done);
   assert.match(stepCue(w, p), /complete/);
+});
+
+test('interval steps do not drift when fixes arrive late', () => {
+  // Run/walk preset: 300 + 8×(60+90) + 300 = 1710 s. Fixes every 1-7 s must still finish at 1710 s.
+  const w = PRESETS.find((x) => x.id === 'beginner')!;
+  const total = w.steps.reduce((s, x) => s + x.value, 0);
+  let p = startProgress(w.id, 0, 0);
+  let t = 0, i = 0, finished = -1;
+  while (!p.done && t < 5000) {
+    t += 1 + (i++ * 7) % 7; // 1..7 s gaps
+    const r = advance(w, p, 0, t);
+    p = r.p;
+    if (p.done) finished = t;
+  }
+  assert.ok(finished >= total && finished < total + 7, `finished at ${finished} s, plan ${total} s`);
+  // and the step after a late detection already shows the lost seconds as elapsed
+  let q = startProgress(w.id, 0, 0);
+  ({ p: q } = advance(w, q, 0, 305)); // warm-up (300 s) detected 5 s late
+  assert.equal(q.startSec, 300);
+  assert.equal(remaining(w, q, 0, 305), 55);
 });
 
 test('speed series', () => {

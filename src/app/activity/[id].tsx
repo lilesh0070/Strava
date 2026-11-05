@@ -9,7 +9,7 @@ import ElevationChart from '../../components/ElevationChart';
 import RouteMap from '../../components/RouteMap';
 import RouteThumb from '../../components/RouteThumb';
 import Stat from '../../components/Stat';
-import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, splits } from '../../lib/geo';
+import { cumulative, fmtDuration, fmtKm, fmtPace, fmtSpeed, smoothAltitude, splits } from '../../lib/geo';
 import { estimateCalories } from '../../lib/calories';
 import { activitySteps, cadence, fmtSteps } from '../../lib/steps';
 import PaceChart from '../../components/PaceChart';
@@ -32,7 +32,7 @@ export default function ActivityDetail() {
   const [weightKg, setWeightKg] = useState(70);
   const { items } = useActivities();
   const prs = useMemo(() => [...personalRecords(items ?? []).values()].filter((r) => r.activityId === id && r.kind === 'effort'), [items, id]);
-  useEffect(() => { getProfile().then((p) => setWeightKg(p.weightKg)); }, []);
+  useEffect(() => { getProfile().then((p) => setWeightKg(p.weightKg || 70)); }, []); // same fallback as the share card
 
   useEffect(() => {
     getActivity(id).then((x) => { setFull(x); setName(x?.name ?? ''); }).catch(() => setFull(null));
@@ -52,8 +52,11 @@ export default function ActivityDetail() {
   const info = sportInfo(a.sport);
   const splitRows = data?.splits ?? [];
   const fastest = splitRows.filter((s) => s.distanceM >= 1000).reduce((m, s) => Math.min(m, s.durationSec), Infinity);
-  const bestPerKm = Math.min(...splitRows.map((s) => s.durationSec * (1000 / s.distanceM)));
-  const maxAlt = data ? Math.max(...data.cum.alt.filter((x): x is number => x != null), -Infinity) : NaN;
+  // bars are scaled against the fastest full kilometre; a 60 m tail at sprint pace must not shrink them all
+  const fullKms = splitRows.filter((s) => s.distanceM >= 1000);
+  const bestPerKm = Math.min(...(fullKms.length ? fullKms : splitRows).map((s) => s.durationSec * (1000 / s.distanceM)));
+  // the same smoothed altitude as the chart and the elevation gain: one noisy fix is not the summit
+  const maxAlt = loaded && a ? Math.max(...a.segments.flatMap((seg) => smoothAltitude(seg)).filter((x): x is number => x != null), -Infinity) : NaN;
 
   const saveFailed = (e: unknown) => Alert.alert(t('act.couldNotSave'), String((e as Error)?.message ?? e));
   const saveName = async () => {

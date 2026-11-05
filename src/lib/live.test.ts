@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { haversine, type Point } from './geo.ts';
 import {
-  STOPPED_MS, distancePending, distanceStep, fixVelocity, gpsHealth, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, parsePace, rollingSpeed, type KalmanState,
+  STOPPED_MS, distancePending, distanceStep, fixVelocity, gpsHealth, hasDoppler, kalmanStep, lapsFromMarks, paceAdvice, parsePace, rollingSpeed, settlePending, type KalmanState,
 } from './live.ts';
 
 const pt = (lat: number, lng: number, t: number, acc = 5): Point => ({ lat, lng, alt: null, acc, t });
@@ -104,11 +104,28 @@ test('gps health', () => {
   assert.equal(gpsHealth(pt(0, 0, 0, 8), 20000), 'lost');
 });
 
-test('fixVelocity: Android "speed 0, no course" is no measurement, not a stop', () => {
+test('fixVelocity: the two "speed 0" conventions — Android no-measurement vs iPhone stop', () => {
   const f = (spd: number | null, hdg: number | null) => ({ ...pt(0, 0, 0, 6), spd, hdg });
-  assert.equal(fixVelocity(f(0, 0), 0.3), null); // a walker on a phone without Doppler must not be pinned at 0
+  // Android, chip without Doppler: 0 with bearing 0 → no measurement (a walker must not be pinned at 0)
+  assert.equal(fixVelocity(f(0, 0), 0.3), null);
   assert.equal(fixVelocity(f(0, 0), 0), null);
-  assert.deepEqual(fixVelocity(f(0, 90)), { ve: 0, vn: 0, sd: 0.3 }); // 0 with a course: a real stop
+  // Android, chip that gave Doppler a moment ago → a real stop
+  assert.deepEqual(fixVelocity(f(0, 0), 0.3, true), { ve: 0, vn: 0, sd: 0.3 });
+  // iPhone standing still: speed 0, course -1 → a real stop, even on the very first fix
+  assert.deepEqual(fixVelocity(f(0, -1)), { ve: 0, vn: 0, sd: 0.3 });
+  assert.deepEqual(fixVelocity(f(0, 90)), { ve: 0, vn: 0, sd: 0.3 }); // 0 with a course: a stop
+  // a slow hiker's 0.3 m/s with a course is a measurement, not a stop
+  const slow = fixVelocity(f(0.3, 90))!;
+  assert.ok(Math.abs(slow.ve - 0.3) < 1e-9 && Math.abs(slow.vn) < 1e-9 && slow.sd === 0.3);
+});
+
+test('kalman: an iPhone standing still (speed 0, course -1) reads as stopped from the first fix', () => {
+  let k: KalmanState | null = null;
+  for (let i = 0; i < 60; i++) {
+    k = kalmanStep(k, { ...pt(19 + noise(i) * 5 / M, 72.8 + noise(i + 500) * 5 / M, i * 1000, 6), spd: 0, hdg: -1 }, 2);
+    if (i > 3) assert.ok(Math.hypot(k.ve, k.vn) < STOPPED_MS, `moving at ${Math.hypot(k.ve, k.vn)} m/s`);
+  }
+  assert.equal(hasDoppler(k, 60_000), true); // a measured stop is Doppler too: the speed path stays in use
 });
 
 test('kalman without Doppler still tracks walking speed', () => {
@@ -124,29 +141,87 @@ test('kalman without Doppler still tracks walking speed', () => {
   assert.equal(hasDoppler(k, 90_000), false);
 });
 
-test('distanceStep: velocity integration on foot with Doppler, position for rides', () => {
-  const kf = (ve: number, dopT?: number): KalmanState => ({ lat: 19, lng: 72.8, ve, vn: 0, pp: 4, pv: 0, vv: 1, t: 10_000, n: 10, rej: 0, vs: ve, dopT });
-  const f = { ...pt(19, 72.8, 10_000, 5), spd: 3, hdg: 90 };
-  assert.ok(Math.abs(distanceStep({}, kf(3, 10_000), f, 'run', 3, 1, 3.4) - 3) < 1e-9); // 3 m/s × 1 s, not the 3.4 m gap
-  assert.equal(distanceStep({}, kf(8, 10_000), f, 'ride', 8, 1, 7.6), 7.6); // rides: the position gap
-  // without recent Doppler the smoothed/gated path is used: nothing credited until the anchor moves
+// ---------- distance stage ----------
+const kfAt = (lat: number, lng: number, ve: number, vn: number, t: number, n = 10, dopT?: number): KalmanState =>
+  ({ lat, lng, ve, vn, pp: 4, pv: 0, vv: 1, t, n, rej: 0, vs: Math.hypot(ve, vn), dopT });
+
+test('distanceStep: on foot with Doppler the filtered speed is integrated per fix, rides use the position', () => {
   const ds = {};
-  assert.equal(distanceStep(ds, kf(1.3), f, 'walk', 1.3, 1, 1.3), 0);
+  const f = (t: number, lat: number) => ({ ...pt(lat, 72.8, t, 5), spd: 3, hdg: 0 });
+  // 3 m/s north, 1 Hz, positions 3.4 m apart (noise): speed × time wins
+  let d = 0;
+  for (let i = 0; i < 10; i++) d += distanceStep(ds, kfAt(19 + (3.4 * i) / M, 72.8, 0, 3, i * 1000, 10, i * 1000), f(i * 1000, 19 + (3.4 * i) / M), 'run').add;
+  assert.ok(Math.abs(d - 27) < 0.05, `${d} m for 9 s at 3 m/s`);
+  // a ride credits the position once it has moved 3 m past the anchor
+  const rs = {};
+  let r = 0;
+  for (let i = 0; i < 10; i++) r += distanceStep(rs, kfAt(19 + (7.6 * i) / M, 72.8, 0, 8, i * 1000, 10, i * 1000), { ...pt(19 + (7.6 * i) / M, 72.8, i * 1000, 5), spd: 8, hdg: 0 }, 'ride').add;
+  assert.ok(Math.abs(r - 7.6 * 9) < 0.1, `${r} m for 9 fixes 7.6 m apart`);
+});
+
+test('distanceStep: standing still adds (almost) nothing, however long, and a restart is credited', () => {
+  const ds = {};
+  let d = 0;
+  let kf: KalmanState | null = null;
+  const at = (i: number, lat: number, spd: number, hdg: number) => {
+    const f = { ...pt(lat + noise(i) * 4 / M, 72.8 + noise(i + 700) * 4 / M, i * 1000, 6), spd, hdg };
+    kf = kalmanStep(kf, f, 2);
+    if (!kf.outlier) d += distanceStep(ds, kf, f, 'run').add;
+  };
+  for (let i = 0; i < 30; i++) at(i, 19 + (3 * i) / M, 3, 0.5); // 30 s run north (course 0.5°: Android's 0 means none)
+  const before = d;
+  for (let i = 30; i < 630; i++) at(i, 19 + 90 / M, Math.abs(noise(i)) * 0.3, 0); // 10 min at a light: small spurious speeds
+  assert.ok(d - before < 5, `${(d - before).toFixed(1)} m crept in while standing`);
+  assert.equal((ds as { still?: boolean }).still, true);
+  for (let i = 630; i < 660; i++) at(i, 19 + (90 + 3 * (i - 629)) / M, 3, 0.5); // off again
+  assert.ok(d > before + 80 && d < before + 95, `${(d - before).toFixed(1)} m for the 90 m after the stop`);
+});
+
+test('distanceStep: a slow hiker who dips under the stop threshold is not clipped', () => {
+  const ds = {};
+  let d = 0;
+  let kf: KalmanState | null = null;
+  for (let i = 0; i < 600; i++) {
+    const spd = 0.7 + noise(i) * 0.45; // 0.25-1.15 m/s: often under STOPPED_MS for a fix or two
+    const f = { ...pt(19 + (0.7 * i + noise(i + 11) * 3) / M, 72.8 + noise(i + 900) * 3 / M, i * 1000, 8), spd, hdg: 0.5 };
+    kf = kalmanStep(kf, f, 1);
+    if (!kf.outlier) d += distanceStep(ds, kf, f, 'hike').add;
+  }
+  assert.ok(Math.abs(d - 420) / 420 < 0.08, `${d.toFixed(0)} m for a 420 m hike`);
+});
+
+test('distanceStep: a GPS outage while moving credits the straight line; while stopped nothing', () => {
+  const walk = (gapM: number) => {
+    const ds = {};
+    let d = 0;
+    let kf: KalmanState | null = null;
+    const step = (i: number, lat: number) => {
+      const f = { ...pt(lat, 72.8, i * 1000, 5), spd: 3, hdg: 0.5 };
+      kf = kalmanStep(kf, f, 2);
+      d += distanceStep(ds, kf, f, 'run').add;
+    };
+    for (let i = 0; i < 20; i++) step(i, 19 + (3 * i) / M);
+    const before = d;
+    for (let i = 80; i < 100; i++) step(i, 19 + (60 + gapM + 3 * (i - 80)) / M); // fixes resume 60 s later
+    return d - before;
+  };
+  assert.ok(walk(180) > 0.8 * (180 + 57), `credited ${walk(180)} m for a 180 m outage + 57 m`); // ran on under the bridge
+  assert.ok(walk(0) < 70, `credited ${walk(0)} m after standing under the bridge`);
 });
 
 test('distanceStep without Doppler credits a steady walk within a few percent', () => {
   const ds = {};
-  let dist = 0, prev = 0;
+  let dist = 0;
   for (let i = 1; i <= 300; i++) {
     const lat = 19 + (1.3 * i) / M;
     const k: KalmanState = { lat, lng: 72.8, ve: 0, vn: 1.3, pp: 4, pv: 0, vv: 1, t: i * 1000, n: i, rej: 0, vs: 1.3 };
     const f = { ...pt(lat, 72.8, i * 1000, 8), spd: 0, hdg: 0 };
-    dist += distanceStep(ds, k, f, 'walk', prev, 1, 1.3);
-    prev = 1.3;
+    dist += distanceStep(ds, k, f, 'walk').add;
   }
   // the smoother lags a little behind (held back until the next anchor / the end of the segment)
   assert.ok(dist > 390 * 0.9 && dist <= 390 * 1.03, `credited ${dist} m for 390 m`);
-  dist += distancePending(ds);
+  dist += settlePending(ds);
   // the smoother's start-up lag costs a fixed ~20 m per segment (0.4 % of a 5 km walk)
   assert.ok(Math.abs(dist - 390) / 390 < 0.07, `with the pending rest: ${dist} m for 390 m`);
+  assert.equal(distancePending(ds), 0);
 });

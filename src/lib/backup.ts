@@ -30,7 +30,11 @@ export function parseBackup(text: string): BackupData & { activities: Activity[]
   let data: BackupData;
   try { data = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
   if (!data || data.format !== FORMAT || !Array.isArray(data.activities)) throw new Error('That file is not a TBDI FitTrack backup.');
-  const activities = data.activities.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && typeof a.startedAt === 'number');
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+  const activities = data.activities
+    .filter((a) => a && typeof a.id === 'string' && Array.isArray(a.segments) && Number.isFinite(a.startedAt))
+    // a hand-edited or truncated file must not bring in NaN that every card would then print
+    .map((a) => ({ ...a, movingSec: num(a.movingSec), elapsedSec: num(a.elapsedSec), distanceM: num(a.distanceM), elevGainM: num(a.elevGainM) }));
   return { ...data, activities };
 }
 

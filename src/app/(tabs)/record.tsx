@@ -146,7 +146,7 @@ export default function Record() {
   // age from when the fix arrived, not its GPS timestamp, so a skewed GPS clock can't fake a signal
   const health = gpsHealth(fix ? { ...fix, t: tracker.getLastFixAt() } : null, now);
   const gpsOk = health === 'good' && precision === 'precise';
-  const cur = tracker.currentSpeed();
+  const cur = tracker.steadySpeed(); // held steady: no flicker at a constant pace
   const laps = active?.laps ?? [];
   // the open lap always starts at the last press, so the display changes the moment Lap is tapped
   const lastMark = laps[laps.length - 1] ?? { distanceM: 0, movingSec: 0 };

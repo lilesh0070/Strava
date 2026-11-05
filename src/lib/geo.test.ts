@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { acceptPoint, bestEffort, elevationGain, fmtDuration, fmtPace, haversine, splits, totalDistance, type Point } from './geo.ts';
+import { acceptPoint, bestEffort, cumulative, elevationGain, fmtDuration, fmtKm, fmtPace, fmtSpeed, haversine, splits, totalDistance, type Point } from './geo.ts';
 
 // Straight line heading north: 0.001° latitude ≈ 111.2 m
 function line(n: number, secPerStep: number, alt?: (i: number) => number): Point[] {
@@ -37,6 +37,35 @@ test('best effort finds fastest km', () => {
   const best = bestEffort([[...slow, ...fast.slice(1)]], 1000)!;
   assert.ok(Math.abs(best - 180) < 2, String(best));
   assert.equal(bestEffort([line(3, 10)], 1000), null);
+});
+
+test('best effort never spans a pause: two rested 600 m reps are not a 1 km effort', () => {
+  const rep1 = line(6, 36); // ~555 m in 3:00
+  const rep2 = line(6, 36).map((p) => ({ ...p, lat: p.lat + 0.02, t: p.t + 15 * 60_000 }));
+  assert.equal(bestEffort([rep1, rep2], 1000), null);
+  // but a continuous km inside one segment still counts
+  assert.ok(bestEffort([line(20, 60)], 1000)! > 0);
+});
+
+test('derived stats follow the recorded distance when points carry it', () => {
+  // points ~111 m apart by chord but the tracker credited 100 m each (smoothed): splits, totals and best efforts use 100
+  const seg = line(20, 60).map((p, i) => ({ ...p, d: i * 100 }));
+  const { d } = cumulative([seg]);
+  assert.equal(d[d.length - 1], 1900);
+  assert.equal(totalDistance([seg]), 1900);
+  assert.equal(splits([seg]).length, 2); // one full km + a 900 m remainder (chords would give 2.1 km)
+  assert.ok(Math.abs(bestEffort([seg], 1000)! - 600) < 1);
+  // an older activity (no d) is still measured from the chords
+  const old = line(20, 60);
+  assert.ok(Math.abs(cumulative([old]).d[19] - 19 * 111.2) < 5);
+});
+
+test('formatters never print NaN', () => {
+  assert.equal(fmtDuration(NaN), '–:––');
+  assert.equal(fmtKm(NaN), '–');
+  assert.equal(fmtKm(-3), '0.00');
+  assert.equal(fmtPace(NaN, 10), '–:––');
+  assert.equal(fmtSpeed(NaN, 10), '0.0');
 });
 
 test('elevation gain ignores small noise and GPS altitude wander', () => {

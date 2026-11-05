@@ -87,9 +87,9 @@ export type Session = {
   distanceM?: number; // running total, kept incrementally
   lastCueKm?: number;
   kf?: KalmanState | null; // smoothing filter state
-  ds?: DistanceState; // distance-stage state (second smoother / anchor for phones without Doppler)
-  /** Filtered speed at the last kept point (for velocity-integrated distance). */
-  lastSpeed?: number;
+  ds?: DistanceState; // distance stage: previous fix, still state, second smoother / anchor (see live.ts)
+  /** Auto-paused: consecutive fixes with the filtered speed above the resume threshold. */
+  moveN?: number;
   laps?: LapMark[];
   lastPaceAlertAt?: number;
   maxSpeedMs?: number;

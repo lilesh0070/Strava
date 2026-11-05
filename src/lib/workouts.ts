@@ -45,7 +45,12 @@ export function advance(w: Workout, p: WorkoutProgress, distM: number, sec: numb
   if (p.done || remaining(w, p, distM, sec) > 0) return { p, changed: false };
   const index = p.index + 1;
   if (index >= w.steps.length) return { p: { ...p, done: true }, changed: true };
-  return { p: { ...p, index, startDistM: distM, startSec: sec }, changed: true };
+  // the next step starts where this one really ended, not when its end was detected (fixes arrive every
+  // 1-7 s): the overshoot is carried over, so late detections never add up across a workout
+  const step = w.steps[p.index];
+  const startSec = step.by === 'time' ? p.startSec + step.value : sec;
+  const startDistM = step.by === 'distance' ? p.startDistM + step.value : distM;
+  return { p: { ...p, index, startDistM, startSec }, changed: true };
 }
 
 const fmtAmount = (s: Step) =>

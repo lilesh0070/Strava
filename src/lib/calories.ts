@@ -5,7 +5,8 @@ import type { Sport } from './types';
 export function metFor(sport: Sport, speedKmh: number): number {
   switch (sport) {
     case 'run':
-      if (speedKmh < 8) return 8;
+      if (speedKmh < 6.4) return 6;
+      if (speedKmh < 8) return 8.3;
       if (speedKmh < 9.7) return 9.8;
       if (speedKmh < 11.3) return 11;
       if (speedKmh < 12.9) return 11.8;
@@ -20,9 +21,14 @@ export function metFor(sport: Sport, speedKmh: number): number {
     case 'walk':
       if (speedKmh < 4) return 2.8;
       if (speedKmh < 5.6) return 3.5;
-      return 4.3;
+      if (speedKmh < 6.4) return 4.3;
+      if (speedKmh < 7.2) return 5;
+      if (speedKmh < 8) return 7;
+      return 8.3; // a brisk walk at running speed burns like a run
     case 'hike':
-      return 6;
+      if (speedKmh < 3) return 5.3;
+      if (speedKmh < 5) return 6;
+      return 7.3;
   }
 }
 
