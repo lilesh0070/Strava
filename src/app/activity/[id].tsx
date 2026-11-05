@@ -1,8 +1,5 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
-import ShareCard, { type ShareCardHandle } from '../../components/ShareCard';
+import { useEffect, useMemo, useState } from 'react';
 import { personalRecords } from '../../lib/records';
 import { useActivities } from '../../lib/useActivities';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -31,7 +28,6 @@ export default function ActivityDetail() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [weightKg, setWeightKg] = useState(70);
-  const shareRef = useRef<ShareCardHandle>(null);
   const { items } = useActivities();
   const prs = useMemo(() => [...personalRecords(items ?? []).values()].filter((r) => r.activityId === id && r.kind === 'effort'), [items, id]);
   useEffect(() => { getProfile().then((p) => setWeightKg(p.weightKg)); }, []);
@@ -56,12 +52,8 @@ export default function ActivityDetail() {
 
   const update = async (next: Activity) => { setA(next); await saveActivity(next); };
 
-  const onShare = async () => {
-    try {
-      const uri = await captureRef(shareRef as unknown as Parameters<typeof captureRef>[0], { format: 'png', quality: 1, result: 'tmpfile' });
-      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share activity' });
-    } catch (e) { Alert.alert('Could not share', String((e as Error)?.message ?? e)); }
-  };
+  // story sticker / photo story / classic card all live on the share screen
+  const onShare = () => router.push(`/share/${a.id}`);
 
   const onExport = () => shareGpx(a).catch((e) => Alert.alert('Export failed', String(e?.message ?? e)));
 
@@ -80,7 +72,7 @@ export default function ActivityDetail() {
         title: info.label,
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, paddingVertical: 4, paddingRight: 4 }}>
-            <NeuIconButton icon="share-variant" size={38} accessibilityLabel="Share as image" onPress={onShare} />
+            <NeuIconButton icon="share-variant" size={38} accessibilityLabel="Share to story or social media" onPress={onShare} />
             <NeuIconButton icon="file-export-outline" size={38} accessibilityLabel="Export GPX" onPress={onExport} />
             <NeuIconButton icon="trash-can-outline" size={38} color={C.danger} accessibilityLabel="Delete activity" onPress={onDelete} />
           </View>
@@ -209,10 +201,6 @@ export default function ActivityDetail() {
           )}
         </View>
       </ScrollView>
-      {/* rendered off-screen, only used as the source for the share image */}
-      <View style={{ position: 'absolute', left: -10000, top: 0 }} pointerEvents="none">
-        <ShareCard ref={shareRef} a={a} />
-      </View>
     </>
   );
 }

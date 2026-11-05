@@ -91,6 +91,15 @@ const en = {
   'set.every': 'Remind every', 'set.workHours': 'Work hours', 'set.workDays': 'Work days', 'set.monFri': 'Mon–Fri', 'set.monSat': 'Mon–Sat',
   'sc.week': 'My wellness week', 'sc.active': 'ACTIVE MIN', 'sc.water': 'WATER GOAL', 'sc.breaks': 'BREAKS', 'sc.sleep': 'AVG SLEEP',
   'sc.score': 'AVG SCORE', 'sc.join': 'Join me on TBDI FitTrack',
+  'sh.title': 'Share', 'sh.bg': 'Background', 'sh.bgNone': 'Sticker', 'sh.bgPhoto': 'Photo', 'sh.bgColor': 'Colour',
+  'sh.gallery': 'Gallery', 'sh.camera': 'Camera', 'sh.layout': 'Layout', 'sh.full': 'Route + stats', 'sh.stats': 'Stats', 'sh.route': 'Route',
+  'sh.text': 'Text', 'sh.white': 'White', 'sh.dark': 'Dark', 'sh.size': 'Size', 'sh.show': 'Show',
+  'sh.distance': 'Distance', 'sh.time': 'Time', 'sh.pace': 'Avg pace', 'sh.speed': 'Avg speed', 'sh.elevation': 'Elev gain', 'sh.calories': 'Calories',
+  'sh.name': 'Title', 'sh.logo': 'Logo', 'sh.share': 'Share', 'sh.save': 'Save', 'sh.saveSticker': 'Save sticker',
+  'sh.saved': 'Saved to your gallery', 'sh.drag': 'Drag the sticker to move it',
+  'sh.howTitle': 'Put it on any Instagram story (photo or video)',
+  'sh.how': '1. Tap “Save sticker”.\n2. In Instagram, start a story with your photo or video.\n3. Stickers → Photo (gallery icon) → pick the sticker. Move and pinch to resize.',
+  'sh.classic': 'Share classic card', 'sh.noPerm': 'Allow photo access to save to your gallery.', 'sh.failed': 'Could not share',
 };
 
 export type Key = keyof typeof en;
@@ -184,6 +193,15 @@ const hi: Partial<Record<Key, string>> = {
   'set.every': 'हर कितनी देर में', 'set.workHours': 'काम के घंटे', 'set.workDays': 'काम के दिन', 'set.monFri': 'सोम–शुक्र', 'set.monSat': 'सोम–शनि',
   'sc.week': 'मेरा वेलनेस हफ़्ता', 'sc.active': 'एक्टिव मिनट', 'sc.water': 'पानी लक्ष्य', 'sc.breaks': 'ब्रेक', 'sc.sleep': 'औसत नींद',
   'sc.score': 'औसत स्कोर', 'sc.join': 'TBDI FitTrack पर मेरे साथ जुड़ें',
+  'sh.title': 'शेयर करें', 'sh.bg': 'बैकग्राउंड', 'sh.bgNone': 'स्टिकर', 'sh.bgPhoto': 'फ़ोटो', 'sh.bgColor': 'रंग',
+  'sh.gallery': 'गैलरी', 'sh.camera': 'कैमरा', 'sh.layout': 'लेआउट', 'sh.full': 'रास्ता + डेटा', 'sh.stats': 'डेटा', 'sh.route': 'रास्ता',
+  'sh.text': 'टेक्स्ट', 'sh.white': 'सफ़ेद', 'sh.dark': 'गहरा', 'sh.size': 'साइज़', 'sh.show': 'दिखाएँ',
+  'sh.distance': 'दूरी', 'sh.time': 'समय', 'sh.pace': 'औसत पेस', 'sh.speed': 'औसत स्पीड', 'sh.elevation': 'चढ़ाई', 'sh.calories': 'कैलोरी',
+  'sh.name': 'नाम', 'sh.logo': 'लोगो', 'sh.share': 'शेयर करें', 'sh.save': 'सेव करें', 'sh.saveSticker': 'स्टिकर सेव करें',
+  'sh.saved': 'गैलरी में सेव हो गया', 'sh.drag': 'स्टिकर को खींचकर जगह बदलें',
+  'sh.howTitle': 'किसी भी इंस्टाग्राम स्टोरी (फ़ोटो या वीडियो) पर लगाएँ',
+  'sh.how': '1. “स्टिकर सेव करें” दबाएँ।\n2. इंस्टाग्राम में अपनी फ़ोटो या वीडियो से स्टोरी शुरू करें।\n3. स्टिकर → फ़ोटो (गैलरी आइकन) → स्टिकर चुनें। खिसकाएँ और दो उंगलियों से छोटा-बड़ा करें।',
+  'sh.classic': 'पुराना कार्ड शेयर करें', 'sh.noPerm': 'गैलरी में सेव करने के लिए फ़ोटो की अनुमति दें।', 'sh.failed': 'शेयर नहीं हो सका',
 };
 
 export function translate(lang: Lang, key: Key): string {

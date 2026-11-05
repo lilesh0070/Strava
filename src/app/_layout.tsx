@@ -57,6 +57,7 @@ function Root() {
         <Stack.Screen name="achievements" options={{ title: 'Achievements' }} />
         <Stack.Screen name="workouts" options={{ title: 'Interval workouts' }} />
         <Stack.Screen name="break" options={{ title: '' }} />
+        <Stack.Screen name="share/[id]" options={{ title: 'Share' }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
       </Stack>
       <UpdateBanner />

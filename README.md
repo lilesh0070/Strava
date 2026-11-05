@@ -90,7 +90,10 @@ Wellbeing guidance only, not medical advice.
 - **Personal records.** Fastest 1k/5k/10k/half, longest, biggest climb. Shown as 🏆 chips and in a pop-up when you beat one.
 - **Weekly insights.** This week vs the same point last week (km, time, % change).
 - **Monthly goal ring** on the You tab.
-- **Share as image.** A neumorphic activity card as a PNG for WhatsApp, Instagram, etc.
+- **Share to Instagram stories and anywhere else.** From any activity, tap Share:
+  - **Sticker:** a transparent PNG with the same orange route line and your stats (distance, time, average pace and speed, plus optional climb, calories and title). Save it, then add it in Instagram with *Stickers → Photo*, on top of any story photo or **video**.
+  - **Photo story:** pick a photo or take one, drag the sticker into place and share a sharp 1080×1920 story to Instagram, WhatsApp or any app.
+  - **Classic card:** the neumorphic summary card.
 - **Fast with a big history.** Lists use a light copy of each activity (simplified route + pre-computed best efforts). Full GPS points load only on the detail screen. Cards are memoised and the list is virtualised.
 - **हिन्दी.** The main screens and voice cues are available in Hindi (Settings → Language).
 - **Onboarding** on first launch, skeleton loaders, tactile press feedback, and **Undo** after deleting an activity.

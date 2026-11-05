@@ -51,6 +51,22 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TBDI FitTrack uses your photos to put your route and stats on top of them for sharing.",
+          "cameraPermission": "TBDI FitTrack uses the camera to take a photo for your activity story.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "TBDI FitTrack saves your activity stickers and stories to your gallery.",
+          "savePhotosPermission": "TBDI FitTrack saves your activity stickers and stories to your gallery.",
+          "granularPermissions": ["photo"]
+        }
+      ],
       "expo-notifications",
       "./plugins/withReleaseSigning",
       "expo-secure-store",
