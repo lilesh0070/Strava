@@ -36,6 +36,13 @@ export async function loadSyncMeta() {
   if (loaded) return meta;
   const raw = await AsyncStorage.getItem(META_KEY);
   meta = { auto: true, ...(raw ? JSON.parse(raw) : {}) };
+  // Android's backup brings this record to a new phone, but never the token (SecureStore keys stay on the old
+  // phone): show "not connected" so the user connects again, instead of a link whose uploads can't run.
+  // Connecting again finds the existing gist and merges it in before the first upload.
+  if (meta.login && !(await SecureStore.getItemAsync(TOKEN_KEY).catch(() => 'unreadable'))) {
+    meta = { auto: meta.auto };
+    await AsyncStorage.setItem(META_KEY, JSON.stringify(meta)).catch(() => undefined);
+  }
   loaded = true;
   snapshot = { meta, busy };
   emit();

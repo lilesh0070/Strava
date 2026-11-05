@@ -33,6 +33,16 @@ test('each phone gets an account and a friend ID', async () => {
   assert.equal(await A.f.enable(), codeA, 'enable again keeps the same ID');
 });
 
+test('a phone restored from Android backup (friend ID kept, sign-in not) gets a new ID instead of failing', async () => {
+  const kv = mem();
+  await kv.set(JSON.stringify({ code: codeA })); // AsyncStorage came back, SecureStore did not
+  const restored = createFriends({ client: createFirebase(cfg, mem()), kv, stats: async () => A.stats });
+  const code = await restored.enable();
+  assert.notEqual(code, codeA);
+  assert.match(code, /^STR-[A-Z0-9]{5}$/);
+  assert.equal(await restored.myCode(), code);
+});
+
 test('send a request by ID; only the two people can see it', async () => {
   assert.equal(await A.f.sendRequest(codeB.toLowerCase().replace('-', ' ')), 'sent');
   const inB = await B.f.incoming();

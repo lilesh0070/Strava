@@ -60,7 +60,7 @@ Wellbeing guidance only, not medical advice.
   - Every activity, with all its GPS points, is stored as its own file.
   - There is no size limit (AsyncStorage on Android caps the whole database at 6 MB).
   - Writes are crash-safe.
-  - Android's own backup (Google cloud backup and phone-to-phone transfer) brings activities, settings, profile, gear and the wellness log to a new phone. It leaves out a recording in progress and the GitHub / Friends sign-ins (they stay in the old phone's keystore; connect again on the new phone).
+  - Android's own backup (Google cloud backup and phone-to-phone transfer) brings activities, settings, profile, gear and the wellness log to a new phone. It leaves out a recording in progress and the GitHub / Friends sign-ins, which stay in the old phone's keystore: connect GitHub again (it finds the existing backup), and turn Friends on again (you get a new friend ID, so add your friends again).
   - Google's cloud backup holds at most 25 MB per app: Android Auto Backup silently stops once app data passes 25 MB (roughly 85 hours of recorded GPS). Phone-to-phone transfer has no cap. To be sure your whole history survives a new phone, use **Settings → Backup** or **GitHub cloud backup**.
   - A recording is only cleared once its activity is safely saved.
   - Existing activities move over automatically on first launch.
