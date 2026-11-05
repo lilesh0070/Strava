@@ -14,12 +14,12 @@ export default function Workouts() {
   return (
     <ScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 60 }}>
       <Text style={{ color: C.muted }}>{t('wo.intro')}</Text>
-      <NeuTile icon="run" title={t('wo.freeRun')} subtitle={t('wo.freeRunSub')} onPress={() => pick(null)}
-        right={selected == null ? <Text style={{ color: C.accent, fontWeight: '800' }}>✓</Text> : null} />
+      <NeuTile icon="run" title={t('wo.freeRun')} subtitle={t('wo.freeRunSub')} onPress={() => pick(null)} selected={selected == null}
+        right={selected == null ? <Text style={{ color: C.accentInk, fontWeight: '800' }}>✓</Text> : null} />
       {PRESETS.map((w) => (
         <View key={w.id} style={{ gap: 10 }}>
-          <NeuTile icon="timer-outline" title={t(w.nameKey)} subtitle={t(w.descKey)} onPress={() => pick(w.id)}
-            right={selected === w.id ? <Text style={{ color: C.accent, fontWeight: '800' }}>✓</Text> : null} />
+          <NeuTile icon="timer-outline" title={t(w.nameKey)} subtitle={t(w.descKey)} onPress={() => pick(w.id)} selected={selected === w.id}
+            right={selected === w.id ? <Text style={{ color: C.accentInk, fontWeight: '800' }}>✓</Text> : null} />
           {selected === w.id && (
             <NeuCard inset radius={20} padding={12} style={{ gap: 4 }}>
               {w.steps.map((s, i) => (
