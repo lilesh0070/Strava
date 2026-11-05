@@ -17,7 +17,7 @@ import { getProfile, onDataChanged, updateProfile, type Profile } from '../../li
 import { useTheme } from '../../lib/theme';
 import { SPORTS, type Sport } from '../../lib/types';
 import { useActivities } from '../../lib/useActivities';
-import { sportName, useT } from '../../lib/i18n';
+import { sportName, useT, type Key } from '../../lib/i18n';
 
 /** Monday `k` weeks before `monday`, by calendar date so DST changes don't shift the buckets. */
 function weeksBefore(monday: number, k: number) {
@@ -42,11 +42,11 @@ function NumberField({ value, onChange, max = Infinity, label, style }: {
   );
 }
 
-const EFFORTS = [
-  { label: '1 km', m: 1000 },
-  { label: '5 km', m: 5000 },
-  { label: '10 km', m: 10000 },
-  { label: 'Half marathon', m: 21097.5 },
+const EFFORTS: { labelKey: Key; m: number }[] = [
+  { labelKey: 'eff.1k', m: 1000 },
+  { labelKey: 'eff.5k', m: 5000 },
+  { labelKey: 'eff.10k', m: 10000 },
+  { labelKey: 'eff.half', m: 21097.5 },
 ];
 
 export default function ProfileScreen() {
@@ -141,7 +141,7 @@ export default function ProfileScreen() {
 
       <NeuCard radius={28} style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
         <GoalRing value={profile?.monthlyGoalKm ? monthKm(items ?? []) / profile.monthlyGoalKm : 0}
-          label={`${monthKm(items ?? []).toFixed(0)}`} sub={`of ${profile?.monthlyGoalKm ?? 0} km`} />
+          label={`${monthKm(items ?? []).toFixed(0)}`} sub={t('you.ofGoal').replace('{n}', String(profile?.monthlyGoalKm ?? 0))} />
         <View style={{ flex: 1, gap: 8 }}>
           <Text style={F.h2}>{new Date().toLocaleDateString(undefined, { month: 'long' })} {t('you.goal')}</Text>
           <Text style={{ color: C.muted, fontSize: 12 }}>{t('you.allSports')}</Text>
@@ -221,8 +221,8 @@ export default function ProfileScreen() {
             <Text style={F.h2}>{t('you.bestEfforts')}</Text>
           </View>
           {records.map((r) => (
-            <NeuCard key={r.label} inset radius={18} padding={12} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ color: C.text, fontWeight: '600' }}>{r.label}</Text>
+            <NeuCard key={r.labelKey} inset radius={18} padding={12} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={{ color: C.text, fontWeight: '600' }}>{t(r.labelKey)}</Text>
               <Text style={{ color: r.best ? C.accent : C.muted, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
                 {r.best ? fmtDuration(r.best) : '—'}
               </Text>

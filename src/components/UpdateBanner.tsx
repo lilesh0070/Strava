@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { AppState, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useT } from '../lib/i18n';
 import { getSettings } from '../lib/storage';
 import { useTheme } from '../lib/theme';
 import { applyOta, checkForUpdates, checkIfStale, installApk, useUpdateState } from '../lib/updates';
@@ -11,6 +12,7 @@ import { IconWell, NeuButton } from './Neu';
 
 export default function UpdateBanner() {
   const { C, S } = useTheme();
+  const { t } = useT();
   const insets = useSafeAreaInsets();
   const u = useUpdateState();
   // the version the user dismissed: the banner stays hidden until a newer one is out
@@ -36,11 +38,11 @@ export default function UpdateBanner() {
       backgroundColor: C.bg, boxShadow: S.raised, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       <IconWell icon="rocket-launch-outline" size={42} />
       <View style={{ flex: 1 }}>
-        <Text style={{ color: C.text, fontWeight: '800' }}>{otaReady ? 'Update downloaded' : `Version ${u.apk?.version} is out`}</Text>
-        <Text style={{ color: C.muted, fontSize: 12 }}>{otaReady ? 'Restart to use the new version.' : 'Tap Update to download and install.'}</Text>
+        <Text style={{ color: C.text, fontWeight: '800' }}>{otaReady ? t('upd.downloaded') : t('upd.versionOut').replace('{v}', String(u.apk?.version))}</Text>
+        <Text style={{ color: C.muted, fontSize: 12 }}>{otaReady ? t('upd.restartHint') : t('upd.tapHint')}</Text>
       </View>
-      <NeuButton small label="Later" onPress={() => setDismissedFor(u.apk?.version ?? '')} />
-      <NeuButton small accent label={otaReady ? 'Restart' : 'Update'}
+      <NeuButton small label={t('upd.later')} onPress={() => setDismissedFor(u.apk?.version ?? '')} />
+      <NeuButton small accent label={otaReady ? t('upd.restartBtn') : t('upd.update')}
         onPress={() => {
           if (otaReady) { applyOta(); return; }
           setDismissedFor(u.apk?.version ?? '');

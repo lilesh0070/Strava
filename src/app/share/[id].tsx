@@ -119,7 +119,7 @@ export default function ShareActivity() {
   }), [pan]);
 
   if (a === undefined) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
-  if (!a) return <Text style={[F.body, { padding: 20 }]}>Activity not found.</Text>;
+  if (!a) return <Text style={[F.body, { padding: 20 }]}>{t('act.notFound')}</Text>;
 
   const tpl = TEMPLATES[page];
   const isSticker = tpl.key === 'clear';

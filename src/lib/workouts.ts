@@ -1,8 +1,16 @@
 // Structured interval workouts. Pure logic; the tracker drives it and speaks the cues.
+import type { Key } from './strings';
 
 export type StepKind = 'warmup' | 'work' | 'rest' | 'cooldown';
 export type Step = { kind: StepKind; by: 'time' | 'distance'; value: number }; // seconds or metres
-export type Workout = { id: string; name: string; description: string; steps: Step[] };
+/**
+ * `name` / `description` are English (the name is stored on saved activities as workoutName and the spoken cues stay
+ * English); screens show `t(w.nameKey)` / `t(w.descKey)`, the `wo.<id>` / `wo.<id>.d` dictionary entries.
+ */
+export type Workout = { id: string; name: string; description: string; nameKey: Key; descKey: Key; steps: Step[] };
+
+const preset = (id: string, name: string, description: string, steps: Step[]): Workout =>
+  ({ id, name, description, nameKey: `wo.${id}` as Key, descKey: `wo.${id}.d` as Key, steps });
 
 const wu: Step = { kind: 'warmup', by: 'time', value: 600 };
 const cd: Step = { kind: 'cooldown', by: 'time', value: 300 };
@@ -10,19 +18,18 @@ const rep = (n: number, work: Step, rest: Step): Step[] =>
   Array.from({ length: n }, (_, i) => (i < n - 1 ? [work, rest] : [work])).flat();
 
 export const PRESETS: Workout[] = [
-  { id: 'beginner', name: 'Run / walk', description: '8 × (1 min run + 1.5 min walk)',
-    steps: [{ kind: 'warmup', by: 'time', value: 300 }, ...rep(8, { kind: 'work', by: 'time', value: 60 }, { kind: 'rest', by: 'time', value: 90 }), cd] },
-  { id: '400s', name: '6 × 400 m', description: 'Speed: 400 m hard, 90 s easy',
-    steps: [wu, ...rep(6, { kind: 'work', by: 'distance', value: 400 }, { kind: 'rest', by: 'time', value: 90 }), cd] },
-  { id: 'kms', name: '5 × 1 km', description: 'Threshold: 1 km at 10K pace, 2 min easy',
-    steps: [wu, ...rep(5, { kind: 'work', by: 'distance', value: 1000 }, { kind: 'rest', by: 'time', value: 120 }), cd] },
-  { id: 'pyramid', name: 'Pyramid', description: '1-2-3-2-1 min hard, equal easy',
-    steps: [wu, ...[60, 120, 180, 120, 60].flatMap((t, i, a) => {
+  preset('beginner', 'Run / walk', '8 × (1 min run + 1.5 min walk)',
+    [{ kind: 'warmup', by: 'time', value: 300 }, ...rep(8, { kind: 'work', by: 'time', value: 60 }, { kind: 'rest', by: 'time', value: 90 }), cd]),
+  preset('400s', '6 × 400 m', 'Speed: 400 m hard, 90 s easy',
+    [wu, ...rep(6, { kind: 'work', by: 'distance', value: 400 }, { kind: 'rest', by: 'time', value: 90 }), cd]),
+  preset('kms', '5 × 1 km', 'Threshold: 1 km at 10K pace, 2 min easy',
+    [wu, ...rep(5, { kind: 'work', by: 'distance', value: 1000 }, { kind: 'rest', by: 'time', value: 120 }), cd]),
+  preset('pyramid', 'Pyramid', '1-2-3-2-1 min hard, equal easy',
+    [wu, ...[60, 120, 180, 120, 60].flatMap((t, i, a) => {
       const work: Step = { kind: 'work', by: 'time', value: t };
       return i < a.length - 1 ? [work, { kind: 'rest', by: 'time', value: t } as Step] : [work];
-    }), cd] },
-  { id: 'tempo', name: 'Tempo 20', description: '20 min comfortably hard',
-    steps: [wu, { kind: 'work', by: 'time', value: 1200 }, cd] },
+    }), cd]),
+  preset('tempo', 'Tempo 20', '20 min comfortably hard', [wu, { kind: 'work', by: 'time', value: 1200 }, cd]),
 ];
 
 export const findWorkout = (id: string | null | undefined) => PRESETS.find((w) => w.id === id) ?? null;
@@ -74,3 +81,7 @@ export function stepCue(w: Workout, p: WorkoutProgress): string {
 
 export const stepLabel = (s: Step) =>
   `${s.kind === 'work' ? 'Hard' : s.kind === 'rest' ? 'Easy' : s.kind === 'warmup' ? 'Warm-up' : 'Cool-down'}`;
+
+/** Dictionary key of a step's label (Hard / Easy / Warm-up / Cool-down) for screens: `t(stepKey(s))`. */
+export const stepKey = (s: Step): Key =>
+  s.kind === 'work' ? 'wo.hard' : s.kind === 'rest' ? 'wo.easy' : s.kind === 'warmup' ? 'wo.warmup' : 'wo.cooldown';

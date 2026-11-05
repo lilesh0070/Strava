@@ -8,6 +8,7 @@
 //  • Sleep: adults need 7–9 hours.
 // This is wellbeing guidance, not medical advice.
 import type { Achievement } from './achievements';
+import { badgeDetailKey, badgeKey, translate } from './strings';
 import type { Activity } from './types';
 
 export type CheckIn = {
@@ -206,7 +207,8 @@ export function checkinStreak(log: WellnessLog, today = dayKey()): number {
 }
 
 // ---------- badges ----------
-type Rule = { id: string; title: string; detail: string; icon: string; target: number; value: number };
+/** Title and detail live in strings.ts under `wbadge.<id>` and `wbadge.<id>.d`. */
+type Rule = { id: string; icon: string; target: number; value: number };
 export function wellnessBadges(log: WellnessLog, acts: Activity[], weightKg: number, today = dayKey()): Achievement[] {
   const minutes = minutesByDay(acts);
   const keys = Object.keys(log);
@@ -229,17 +231,17 @@ export function wellnessBadges(log: WellnessLog, acts: Activity[], weightKg: num
     return best;
   };
   const rules: Rule[] = [
-    { id: 'w-hydrated', title: 'Hydration hero', detail: 'Hit your water goal on 5 days', icon: 'cup-water', target: 5, value: waterHit },
-    { id: 'w-desk', title: 'Desk hero', detail: 'Take 25 stretch or eye breaks', icon: 'human-handsup', target: 25, value: sum((d) => d.breaks + d.eyeBreaks) },
-    { id: 'w-calm', title: 'Calm mind', detail: '30 minutes of guided breathing', icon: 'meditation', target: 30, value: sum((d) => d.mindfulMin) },
-    { id: 'w-checkin', title: 'Self-aware', detail: 'Check in 7 days in a row', icon: 'emoticon-happy-outline', target: 7, value: longest((k) => !!log[k]?.checkin) },
-    { id: 'w-who', title: 'WHO week', detail: '150 active minutes in one week', icon: 'heart-pulse', target: WHO_WEEKLY_MIN, value: bestWeek },
-    { id: 'w-score', title: 'Feel-good day', detail: 'Reach a wellness score of 80', icon: 'star-face', target: 80, value: bestScore },
-    { id: 'w-streak', title: 'Healthy habit', detail: '7 good wellness days in a row', icon: 'fire', target: 7,
+    { id: 'w-hydrated', icon: 'cup-water', target: 5, value: waterHit }, // water goal on 5 days
+    { id: 'w-desk', icon: 'human-handsup', target: 25, value: sum((d) => d.breaks + d.eyeBreaks) }, // 25 stretch / eye breaks
+    { id: 'w-calm', icon: 'meditation', target: 30, value: sum((d) => d.mindfulMin) }, // 30 min of guided breathing
+    { id: 'w-checkin', icon: 'emoticon-happy-outline', target: 7, value: longest((k) => !!log[k]?.checkin) }, // 7 check-ins in a row
+    { id: 'w-who', icon: 'heart-pulse', target: WHO_WEEKLY_MIN, value: bestWeek }, // 150 active minutes in a week
+    { id: 'w-score', icon: 'star-face', target: 80, value: bestScore }, // wellness score of 80
+    { id: 'w-streak', icon: 'fire', target: 7, // 7 good days in a row
       value: Math.max(scoreStreak(log, minutes, weightKg, today), longest((k) => scoreOn(k, log, minutes, weightKg) >= GOOD_DAY_SCORE)) },
   ];
   return rules.map((r) => ({
-    id: r.id, title: r.title, detail: r.detail, icon: r.icon,
+    id: r.id, title: translate('en', badgeKey(r.id)), detail: translate('en', badgeDetailKey(r.id)), icon: r.icon,
     earned: r.value >= r.target, progress: clamp(r.value / r.target, 0, 1),
   }));
 }

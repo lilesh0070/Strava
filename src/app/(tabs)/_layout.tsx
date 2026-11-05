@@ -34,7 +34,7 @@ export default function TabsLayout() {
         title: t('tab.feed'),
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <NeuIconButton icon="plus" size={40} accessibilityLabel="Add activity manually" onPress={() => router.push('/add-activity')} />
+            <NeuIconButton icon="plus" size={40} accessibilityLabel={t('add.a11y')} onPress={() => router.push('/add-activity')} />
             <SettingsButton />
           </View>
         ),

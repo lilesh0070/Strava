@@ -35,6 +35,8 @@ export type Activity = {
   /** Present on list summaries: segments are simplified for drawing, best efforts are pre-computed. */
   lite?: boolean;
   efforts?: Record<string, number>; // metres → fastest seconds
+  /** Which best-effort algorithm filled `efforts`; older summaries are rebuilt when it changes. */
+  effortsV?: number;
 };
 
 export type GearKind = 'shoes' | 'bike';
@@ -88,8 +90,8 @@ export type Session = {
   lastCueKm?: number;
   kf?: KalmanState | null; // smoothing filter state
   ds?: DistanceState; // distance stage: previous fix, still state, second smoother / anchor (see live.ts)
-  /** Auto-paused: consecutive fixes with the filtered speed above the resume threshold. */
-  moveN?: number;
+  /** Auto-paused: consecutive fixes with the filtered speed above the resume threshold / clearly away from the stop point. */
+  moveN?: number; hopN?: number;
   laps?: LapMark[];
   lastPaceAlertAt?: number;
   maxSpeedMs?: number;
@@ -124,8 +126,13 @@ export function newActivityId(startedAt: number, tag = ''): string {
   return `${startedAt.toString(36)}${tag}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function defaultName(sport: Sport, startedAt: number): string {
+const HI_SPORT: Record<Sport, string> = { run: 'दौड़', ride: 'राइड', walk: 'वॉक', hike: 'हाइक' };
+const HI_PART = { Night: 'रात की', Morning: 'सुबह की', Afternoon: 'दोपहर की', Evening: 'शाम की' };
+
+/** "Morning Run" / "सुबह की दौड़": the name a new activity gets in the app language (stored names are never changed). */
+export function defaultName(sport: Sport, startedAt: number, lang: 'en' | 'hi' = 'en'): string {
   const h = new Date(startedAt).getHours();
   const part = h < 5 ? 'Night' : h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night';
+  if (lang === 'hi') return `${HI_PART[part]} ${HI_SPORT[sport]}`;
   return `${part} ${sportInfo(sport).label}`;
 }

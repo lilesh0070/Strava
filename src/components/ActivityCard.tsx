@@ -62,7 +62,7 @@ function ActivityCard({ a }: { a: Activity }) {
         <NeuCard inset radius={20} padding={4}>
           <RouteThumb segments={a.segments} width={width - 80} height={140} />
         </NeuCard>
-      ) : a.manual ? <Text style={{ color: C.muted, fontSize: 12 }}>Added manually</Text> : null}
+      ) : a.manual ? <Text style={{ color: C.muted, fontSize: 12 }}>{t('act.addedManually')}</Text> : null}
     </Pressable>
   );
 }

@@ -2,6 +2,7 @@ import { memo, useMemo } from 'react';
 import { Text, View } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
 import { fmtPace } from '../lib/geo';
+import { useT } from '../lib/i18n';
 import { speedSeries } from '../lib/live';
 import type { Point } from '../lib/geo';
 import { useTheme } from '../lib/theme';
@@ -10,6 +11,7 @@ import { IconWell, NeuCard } from './Neu';
 /** Pace (or speed) along the route. Faster is drawn higher for both. */
 function PaceChart({ segments, usesPace, width }: { segments: Point[][]; usesPace: boolean; width: number }) {
   const { C, F } = useTheme();
+  const { t } = useT();
   const s = useMemo(() => speedSeries(segments), [segments]);
   if (s.length < 4) return null;
   const height = 110;
@@ -26,8 +28,8 @@ function PaceChart({ segments, usesPace, width }: { segments: Point[][]; usesPac
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <IconWell icon="chart-bell-curve-cumulative" />
         <View style={{ flex: 1 }}>
-          <Text style={F.h2}>{usesPace ? 'Pace' : 'Speed'}</Text>
-          <Text style={{ color: C.muted, fontSize: 12 }}>Fastest {fmt(hi)} · average {fmt(avg)}</Text>
+          <Text style={F.h2}>{t(usesPace ? 'act.pace' : 'act.speed')}</Text>
+          <Text style={{ color: C.muted, fontSize: 12 }}>{t('chart.fastest').replace('{a}', fmt(hi)).replace('{b}', fmt(avg))}</Text>
         </View>
       </View>
       <NeuCard inset radius={18} padding={8}>

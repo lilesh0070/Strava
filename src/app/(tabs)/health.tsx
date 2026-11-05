@@ -99,11 +99,11 @@ function CheckInCard({ today, previous, streak }: { today?: CheckIn; previous?: 
       </View>
       <Text style={F.label}>{t('h.sleep')}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
-        <NeuIconButton icon="minus" size={40} accessibilityLabel="Less sleep" onPress={() => setSleepH((h) => Math.max(0, h - 0.5))} />
+        <NeuIconButton icon="minus" size={40} accessibilityLabel={t('h.lessSleep')} onPress={() => setSleepH((h) => Math.max(0, h - 0.5))} />
         <Text style={{ color: sleepH < 7 ? AMBER : C.text, fontSize: 24, fontWeight: '900', width: 100, textAlign: 'center', fontVariant: ['tabular-nums'] }}>
           {sleepH} {t('h.hours')}
         </Text>
-        <NeuIconButton icon="plus" size={40} accessibilityLabel="More sleep" onPress={() => setSleepH((h) => Math.min(14, h + 0.5))} />
+        <NeuIconButton icon="plus" size={40} accessibilityLabel={t('h.moreSleep')} onPress={() => setSleepH((h) => Math.min(14, h + 0.5))} />
       </View>
       <Text style={F.label}>{t('h.stress')}</Text>
       <NeuSegmented value={stress} onChange={setStress}
@@ -223,7 +223,7 @@ export default function HealthScreen() {
             ))}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <NeuIconButton icon="minus" size={46} accessibilityLabel="Remove a glass" onPress={() => day.waterMl > 0 && drink(-GLASS_ML)} />
+            <NeuIconButton icon="minus" size={46} accessibilityLabel={t('h.removeGlass')} onPress={() => day.waterMl > 0 && drink(-GLASS_ML)} />
             <NeuButton accent icon="plus" label={`${t('h.addGlass')} · ${GLASS_ML} ml`} style={{ flex: 1 }} onPress={() => drink(GLASS_ML)} />
           </View>
         </NeuCard>

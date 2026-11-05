@@ -53,7 +53,7 @@ export default function SettingsScreen() {
     const ok = await setDailyReminder(true, h).catch(() => false);
     if (!ok) {
       set({ reminder: false }); // the old one was cancelled, so don't show it as on
-      Alert.alert('Notifications are off', 'Allow notifications for TBDI FitTrack in system settings.');
+      Alert.alert(t('set.notifOff'), t('set.notifOffBody'));
       return;
     }
     set({ reminderHour: h });
@@ -62,7 +62,7 @@ export default function SettingsScreen() {
   const setBreaks = async (patch: Partial<Settings>) => {
     const next = { ...s, ...patch };
     if (next.breakReminders && !(await setBreakReminders(next).catch(() => false))) {
-      Alert.alert('Notifications are off', 'Allow notifications for TBDI FitTrack in system settings.');
+      Alert.alert(t('set.notifOff'), t('set.notifOffBody'));
       return;
     }
     if (!next.breakReminders) await setBreakReminders(next).catch(() => undefined);
@@ -72,9 +72,9 @@ export default function SettingsScreen() {
     <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
       <Text style={{ color: C.muted, fontSize: 12 }}>{label}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <NeuIconButton icon="minus" size={34} accessibilityLabel={`${label} earlier`} onPress={() => value > min && onChange(value - 1)} />
+        <NeuIconButton icon="minus" size={34} accessibilityLabel={t('set.hourEarlier').replace('{l}', label)} onPress={() => value > min && onChange(value - 1)} />
         <Text style={{ color: C.text, fontWeight: '800', fontSize: 16, width: 52, textAlign: 'center' }}>{String(value).padStart(2, '0')}:00</Text>
-        <NeuIconButton icon="plus" size={34} accessibilityLabel={`${label} later`} onPress={() => value < max && onChange(value + 1)} />
+        <NeuIconButton icon="plus" size={34} accessibilityLabel={t('set.hourLater').replace('{l}', label)} onPress={() => value < max && onChange(value + 1)} />
       </View>
     </View>
   );
@@ -86,12 +86,12 @@ export default function SettingsScreen() {
 
   // ---------- update card ----------
   const downloading = u.apkProgress != null;
-  let status = 'Tap to check for a newer version.';
-  if (u.checking) status = 'Checking…';
-  else if (u.ota === 'downloading') status = 'Downloading update…';
-  else if (u.ota === 'ready') status = 'Update downloaded. Restart to apply.';
-  else if (u.apk) status = `Version ${u.apk.version} is available${u.apk.size ? ` (${(u.apk.size / 1048576).toFixed(1)} MB)` : ''}.`;
-  else if (u.lastChecked) status = `You're up to date · checked ${new Date(u.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  let status = t('upd.tapCheck');
+  if (u.checking) status = t('upd.checking');
+  else if (u.ota === 'downloading') status = t('upd.downloading');
+  else if (u.ota === 'ready') status = t('upd.ready');
+  else if (u.apk) status = `${t('upd.available').replace('{v}', String(u.apk.version))}${u.apk.size ? ` (${(u.apk.size / 1048576).toFixed(1)} MB)` : ''}.`;
+  else if (u.lastChecked) status = t('upd.upToDate').replace('{time}', new Date(u.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
   return (
     <ScrollView contentContainerStyle={{ padding: 20, gap: 28, paddingBottom: 60 }}>
@@ -101,7 +101,7 @@ export default function SettingsScreen() {
             <IconWell icon={u.apk || u.ota === 'ready' ? 'rocket-launch-outline' : 'shield-check-outline'} size={52} />
             <View style={{ flex: 1 }}>
               <Text style={F.h2}>TBDI FitTrack {currentVersion()}</Text>
-              <Text style={{ color: C.muted, fontSize: 12 }}>Build {currentBuildId()}</Text>
+              <Text style={{ color: C.muted, fontSize: 12 }}>{t('upd.build')} {currentBuildId()}</Text>
             </View>
           </View>
           <Text style={{ color: u.error ? C.danger : C.text }}>{u.error ?? status}</Text>
@@ -109,22 +109,22 @@ export default function SettingsScreen() {
           {downloading && (
             <View style={{ gap: 6 }}>
               <NeuProgress value={u.apkProgress ?? 0} />
-              <Text style={{ color: C.muted, fontSize: 12 }}>Downloading… {Math.round((u.apkProgress ?? 0) * 100)}%</Text>
+              <Text style={{ color: C.muted, fontSize: 12 }}>{t('upd.progress').replace('{p}', String(Math.round((u.apkProgress ?? 0) * 100)))}</Text>
             </View>
           )}
 
           {u.apk?.notes ? (
             <NeuCard inset radius={18} padding={12}>
-              <Text style={[F.label, { marginBottom: 4 }]}>{"What's new"}</Text>
+              <Text style={[F.label, { marginBottom: 4 }]}>{t('upd.whatsNew')}</Text>
               <Text style={{ color: C.text, fontSize: 13 }} numberOfLines={8}>{u.apk.notes}</Text>
             </NeuCard>
           ) : null}
 
           <View style={{ flexDirection: 'row', gap: 12 }}>
             {u.ota === 'ready' ? (
-              <NeuButton accent icon="restart" label="Restart & update" style={{ flex: 1 }} onPress={() => applyOta()} />
+              <NeuButton accent icon="restart" label={t('upd.restart')} style={{ flex: 1 }} onPress={() => applyOta()} />
             ) : u.apk ? (
-              <NeuButton accent icon="download" label={downloading ? 'Downloading…' : 'Download & install'} style={{ flex: 1 }}
+              <NeuButton accent icon="download" label={downloading ? t('upd.dl') : t('upd.install')} style={{ flex: 1 }}
                 disabled={downloading} onPress={() => installApk()} />
             ) : (
               <NeuButton icon="refresh" label={u.checking ? '…' : t('set.check')} style={{ flex: 1 }}
@@ -132,12 +132,10 @@ export default function SettingsScreen() {
             )}
           </View>
           {u.apk ? (
-            <Text style={{ color: C.muted, fontSize: 11 }}>
-              Android will ask you to allow installs from TBDI FitTrack the first time. Your activities are kept.
-            </Text>
+            <Text style={{ color: C.muted, fontSize: 11 }}>{t('upd.androidNote')}</Text>
           ) : null}
           {u.apk && u.error && !downloading ? (
-            <NeuButton small icon="open-in-new" label="Open download page" onPress={() => Linking.openURL(u.apk!.htmlUrl)} />
+            <NeuButton small icon="open-in-new" label={t('upd.openPage')} onPress={() => Linking.openURL(u.apk!.htmlUrl)} />
           ) : null}
         </NeuCard>
         {toggle('update', t('set.checkAuto'), t('set.checkAutoSub'), 'autoCheckUpdates')}
@@ -149,9 +147,9 @@ export default function SettingsScreen() {
       <Section title={t('set.appearance')}>
         <NeuSegmented value={s.theme} onChange={(theme) => set({ theme })}
           options={[
-            { key: 'system', label: 'Auto', icon: 'theme-light-dark' },
-            { key: 'light', label: 'Light', icon: 'white-balance-sunny' },
-            { key: 'dark', label: 'Dark', icon: 'weather-night' },
+            { key: 'system', label: t('set.themeAuto'), icon: 'theme-light-dark' },
+            { key: 'light', label: t('set.themeLight'), icon: 'white-balance-sunny' },
+            { key: 'dark', label: t('set.themeDark'), icon: 'weather-night' },
           ]} />
       </Section>
 
@@ -169,37 +167,38 @@ export default function SettingsScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon="crosshairs-gps" />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>GPS accuracy</Text>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>{t('set.gps')}</Text>
               <Text style={{ color: C.muted, fontSize: 13 }}>
                 {s.gpsMode === 'saver'
-                  ? 'A fix every 3 s, batched in the background. Uses less battery, less precise on bends.'
-                  : 'Full GPS every second with Doppler speed. Most accurate route, distance and live pace.'}
+                  // iOS still delivers a fix every second; the saver mode only lowers the precision target there
+                  ? t(Platform.OS === 'ios' ? 'set.gpsSaverIos' : 'set.gpsSaverAndroid')
+                  : t('set.gpsPrecise')}
               </Text>
             </View>
           </View>
           <NeuSegmented value={s.gpsMode} onChange={(gpsMode) => set({ gpsMode })}
-            options={[{ key: 'precise', label: 'Precise' }, { key: 'saver', label: 'Battery saver' }]} />
+            options={[{ key: 'precise', label: t('set.precise') }, { key: 'saver', label: t('set.saver') }]} />
         </NeuCard>
         <NeuCard radius={26} style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon="speedometer" />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>Pace coach</Text>
-              <Text style={{ color: C.muted, fontSize: 13 }}>Voice nudge when you drift ±15 s from your target</Text>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>{t('set.paceCoach')}</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>{t('set.paceCoachSub')}</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TextInput value={paceText} onChangeText={setPaceText} placeholder="e.g. 5:30" placeholderTextColor={C.muted}
-              keyboardType="numbers-and-punctuation" accessibilityLabel="Target pace per kilometre"
+            <TextInput value={paceText} onChangeText={setPaceText} placeholder={t('set.paceEg')} placeholderTextColor={C.muted}
+              keyboardType="numbers-and-punctuation" accessibilityLabel={t('set.paceA11y')}
               onEndEditing={() => {
                 const v = paceText.trim() ? parsePace(paceText) : null;
-                if (paceText.trim() && v == null) { Alert.alert('Use minutes:seconds', 'For example 5:30'); return; }
+                if (paceText.trim() && v == null) { Alert.alert(t('set.paceFormat'), t('set.paceFormatBody')); return; }
                 set({ targetPaceSec: v });
               }}
               style={{ flex: 1, color: C.text, backgroundColor: C.bg, boxShadow: S.insetSm, borderRadius: 999,
                 paddingHorizontal: 18, paddingVertical: 10, fontWeight: '700' }} />
             <Text style={{ color: C.muted }}>/km</Text>
-            {s.targetPaceSec ? <NeuButton small label="Off" onPress={() => { setPaceText(''); set({ targetPaceSec: null }); }} /> : null}
+            {s.targetPaceSec ? <NeuButton small label={t('set.off')} onPress={() => { setPaceText(''); set({ targetPaceSec: null }); }} /> : null}
           </View>
         </NeuCard>
         <NeuCard radius={26} style={{ gap: 12 }}>
@@ -233,8 +232,7 @@ export default function SettingsScreen() {
           </View>
         </NeuCard>
         {Platform.OS === 'android' && (
-          <NeuTile icon="battery-heart-variant" title="Reliable background recording"
-            subtitle="Set TBDI FitTrack to “Unrestricted” battery use so Android never stops a recording"
+          <NeuTile icon="battery-heart-variant" title={t('set.bgTitle')} subtitle={t('set.bgSub')}
             onPress={() => IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
               .catch(() => Linking.openSettings())} />
         )}
@@ -257,8 +255,8 @@ export default function SettingsScreen() {
                 options={['45', '60', '90', '120'].map((m) => ({ key: m, label: `${m}m` }))} />
               <Text style={F.label}>{t('set.workHours')}</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                {hourStepper('Start', s.workStartH, 5, s.workEndH - 2, (h) => setBreaks({ workStartH: h }))}
-                {hourStepper('End', s.workEndH, s.workStartH + 2, 23, (h) => setBreaks({ workEndH: h }))}
+                {hourStepper(t('set.start'), s.workStartH, 5, s.workEndH - 2, (h) => setBreaks({ workStartH: h }))}
+                {hourStepper(t('set.end'), s.workEndH, s.workStartH + 2, 23, (h) => setBreaks({ workEndH: h }))}
               </View>
               <Text style={F.label}>{t('set.workDays')}</Text>
               <NeuSegmented value={s.workDays} onChange={(workDays) => setBreaks({ workDays })}
@@ -273,20 +271,20 @@ export default function SettingsScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconWell icon="bell-ring-outline" />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>Daily reminder</Text>
-              <Text style={{ color: C.muted, fontSize: 13 }}>A gentle nudge every day at {s.reminderHour}:00</Text>
+              <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }}>{t('set.daily')}</Text>
+              <Text style={{ color: C.muted, fontSize: 13 }}>{t('set.dailySub').replace('{h}', String(s.reminderHour))}</Text>
             </View>
-            <NeuSwitch accessibilityLabel="Daily reminder" value={s.reminder} onValueChange={async (v) => {
+            <NeuSwitch accessibilityLabel={t('set.daily')} value={s.reminder} onValueChange={async (v) => {
               const ok = await setDailyReminder(v, s.reminderHour).catch(() => false);
-              if (!ok) { Alert.alert('Notifications are off', 'Allow notifications for TBDI FitTrack in system settings.'); return; }
+              if (!ok) { Alert.alert(t('set.notifOff'), t('set.notifOffBody')); return; }
               set({ reminder: v });
             }} />
           </View>
           {s.reminder && (
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-              <NeuIconButton icon="minus" size={38} accessibilityLabel="Earlier" onPress={() => moveReminder((s.reminderHour + 23) % 24)} />
+              <NeuIconButton icon="minus" size={38} accessibilityLabel={t('set.earlier')} onPress={() => moveReminder((s.reminderHour + 23) % 24)} />
               <Text style={{ color: C.text, fontWeight: '800', fontSize: 18, width: 70, textAlign: 'center' }}>{String(s.reminderHour).padStart(2, '0')}:00</Text>
-              <NeuIconButton icon="plus" size={38} accessibilityLabel="Later" onPress={() => moveReminder((s.reminderHour + 1) % 24)} />
+              <NeuIconButton icon="plus" size={38} accessibilityLabel={t('set.later')} onPress={() => moveReminder((s.reminderHour + 1) % 24)} />
             </View>
           )}
         </NeuCard>
@@ -298,13 +296,13 @@ export default function SettingsScreen() {
 
       <Section title={t('set.data')}>
         <GithubSyncCard />
-        <NeuTile icon="cloud-upload-outline" title="Back up" subtitle="Save all activities, gear and settings to a file"
+        <NeuTile icon="cloud-upload-outline" title={t('set.backup')} subtitle={t('set.backupSub')}
           onPress={() => exportBackup()
             .then(({ unreadable }) => {
-              if (unreadable) Alert.alert('Some activities left out', `${unreadable} activit${unreadable === 1 ? 'y' : 'ies'} could not be read on this phone and ${unreadable === 1 ? 'is' : 'are'} not in the file.`);
+              if (unreadable) Alert.alert(t('set.leftOut'), unreadable === 1 ? t('set.leftOutBody1') : t('set.leftOutBody').replace('{n}', String(unreadable)));
             })
-            .catch((e) => Alert.alert('Backup failed', String(e?.message ?? e)))} />
-        <NeuTile icon="cloud-download-outline" title="Restore" subtitle="Import a TBDI FitTrack backup file (merges, nothing is deleted)"
+            .catch((e) => Alert.alert(t('set.backupFailed'), String(e?.message ?? e)))} />
+        <NeuTile icon="cloud-download-outline" title={t('set.restore')} subtitle={t('set.restoreSub')}
           onPress={async () => {
             try {
               const n = await importBackup();
@@ -315,19 +313,19 @@ export default function SettingsScreen() {
               // schedule (or cancel) to match the restored setting
               const ok = await setDailyReminder(next.reminder, next.reminderHour).catch(() => false);
               if (next.reminder && !ok) set({ reminder: false });
-              Alert.alert('Restored', `${n} new activities imported.`);
+              Alert.alert(t('set.restored'), t('set.restoredBody').replace('{n}', String(n)));
               storageBytes().then(setBytes).catch(() => undefined);
-            } catch (e) { Alert.alert('Restore failed', String((e as Error)?.message ?? e)); }
+            } catch (e) { Alert.alert(t('set.restoreFailed'), String((e as Error)?.message ?? e)); }
           }} />
         {bytes != null && (
-          <Text style={{ color: C.muted, fontSize: 12, marginLeft: 6 }}>Using {(bytes / 1024).toFixed(0)} KB on this device</Text>
+          <Text style={{ color: C.muted, fontSize: 12, marginLeft: 6 }}>{t('set.usage').replace('{kb}', (bytes / 1024).toFixed(0))}</Text>
         )}
       </Section>
 
       <Section title={t('set.about')}>
         <NeuTile icon="share-variant" title={t('app.share')} subtitle={t('app.shareSub')}
           onPress={() => shareApp(t).catch(() => undefined)} />
-        <Text style={{ color: C.muted, fontSize: 11, marginLeft: 6 }}>Map data © OpenStreetMap contributors</Text>
+        <Text style={{ color: C.muted, fontSize: 11, marginLeft: 6 }}>{t('set.mapCredit')}</Text>
       </Section>
     </ScrollView>
   );

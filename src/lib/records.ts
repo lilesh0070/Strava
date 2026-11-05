@@ -1,16 +1,18 @@
 // Personal records and week-over-week insights (pure, unit-tested).
 import { mondayOf as monday } from './coach';
 import { bestEffort } from './geo';
-import type { Activity } from './types';
+import type { Key } from './strings';
+import type { Activity, Sport } from './types';
 
 export type RecordKind = 'effort' | 'longest' | 'climb';
-export type PersonalRecord = { key: string; label: string; kind: RecordKind; value: number; activityId: string };
+/** `label` is English; screens show `prLabel(t, r)` (i18n.tsx), which uses `labelKey` and, for 'longest', `sport`. */
+export type PersonalRecord = { key: string; label: string; labelKey: Key; sport: Sport; kind: RecordKind; value: number; activityId: string };
 
-const EFFORTS = [
-  { key: 'run-1k', label: 'Fastest 1 km', m: 1000 },
-  { key: 'run-5k', label: 'Fastest 5 km', m: 5000 },
-  { key: 'run-10k', label: 'Fastest 10 km', m: 10000 },
-  { key: 'run-half', label: 'Fastest half marathon', m: 21097.5 },
+const EFFORTS: { key: string; label: string; labelKey: Key; m: number }[] = [
+  { key: 'run-1k', label: 'Fastest 1 km', labelKey: 'pr.1k', m: 1000 },
+  { key: 'run-5k', label: 'Fastest 5 km', labelKey: 'pr.5k', m: 5000 },
+  { key: 'run-10k', label: 'Fastest 10 km', labelKey: 'pr.10k', m: 10000 },
+  { key: 'run-half', label: 'Fastest half marathon', labelKey: 'pr.half', m: 21097.5 },
 ];
 
 /** Best value per record across activities (efforts: lowest seconds; others: highest). */
@@ -24,11 +26,11 @@ export function personalRecords(acts: Activity[]): Map<string, PersonalRecord> {
     if (a.sport === 'run' && !a.manual) {
       for (const e of EFFORTS) {
         const t = a.efforts ? a.efforts[e.m] ?? null : bestEffort(a.segments, e.m);
-        if (t != null) consider({ key: e.key, label: e.label, kind: 'effort', value: t, activityId: a.id }, true);
+        if (t != null) consider({ key: e.key, label: e.label, labelKey: e.labelKey, sport: a.sport, kind: 'effort', value: t, activityId: a.id }, true);
       }
     }
-    if (a.distanceM > 0) consider({ key: `longest-${a.sport}`, label: `Longest ${a.sport}`, kind: 'longest', value: a.distanceM, activityId: a.id }, false);
-    if (a.elevGainM > 0) consider({ key: 'climb', label: 'Biggest climb', kind: 'climb', value: a.elevGainM, activityId: a.id }, false);
+    if (a.distanceM > 0) consider({ key: `longest-${a.sport}`, label: `Longest ${a.sport}`, labelKey: 'pr.longest', sport: a.sport, kind: 'longest', value: a.distanceM, activityId: a.id }, false);
+    if (a.elevGainM > 0) consider({ key: 'climb', label: 'Biggest climb', labelKey: 'pr.climb', sport: a.sport, kind: 'climb', value: a.elevGainM, activityId: a.id }, false);
   }
   return out;
 }
