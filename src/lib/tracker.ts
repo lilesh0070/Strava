@@ -65,8 +65,14 @@ export const getLastFix = () => lastFix;
 
 async function load() {
   if (loaded) return;
-  const raw = await AsyncStorage.getItem(SESSION_KEY);
-  session = raw ? JSON.parse(raw) : null;
+  try {
+    const raw = await AsyncStorage.getItem(SESSION_KEY);
+    session = raw ? JSON.parse(raw) : null;
+  } catch {
+    // unreadable (e.g. corrupt, or a huge session over Android's 2 MB read limit): start clean rather
+    // than failing every later start/ingest
+    session = null;
+  }
   loaded = true;
 }
 async function persist() {

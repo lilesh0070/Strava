@@ -35,7 +35,7 @@ export default function SettingsScreen() {
   const loadSettings = () => getSettings().then((x) => { setS(x); setPaceText(x.targetPaceSec ? fmtDuration(x.targetPaceSec) : ''); return x; });
   useEffect(() => {
     loadSettings();
-    storageBytes().then(setBytes);
+    storageBytes().then(setBytes).catch(() => undefined);
   }, []);
   if (!s) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
 
@@ -215,7 +215,7 @@ export default function SettingsScreen() {
               refreshSettings();
               if (next.reminder && !(await setDailyReminder(true, next.reminderHour).catch(() => false))) set({ reminder: false });
               Alert.alert('Restored', `${n} new activities imported.`);
-              storageBytes().then(setBytes);
+              storageBytes().then(setBytes).catch(() => undefined);
             } catch (e) { Alert.alert('Restore failed', String((e as Error)?.message ?? e)); }
           }} />
         {bytes != null && (

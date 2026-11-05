@@ -8,7 +8,10 @@ const PROFILE = 'stride:profile';
 // Lists (feed, profile, badges) only need a light copy of each activity: a simplified route for
 // the thumbnail and pre-computed best efforts. Reading thousands of raw GPS points for every
 // card made the feed slow; full points are now loaded only on the detail screen.
-const SUMMARIES = 'stride:summaries';
+// Each summary has its own key: Android can't read back a single value over 2 MB (its SQLite
+// CursorWindow limit), which one combined blob reached after a few hundred activities.
+const summaryKey = (id: string) => `stride:summary:${id}`;
+const LEGACY_SUMMARIES = 'stride:summaries'; // one blob for all summaries (v1.2), migrated on first read
 export const EFFORT_DISTANCES = [1000, 5000, 10000, 21097.5];
 
 export type Profile = { name: string; weeklyGoalKm: number; weightKg: number; monthlyGoalKm: number };
@@ -49,28 +52,69 @@ export function toSummary(a: Activity): Activity {
   return { ...a, lite: true, efforts, segments: a.segments.map((g) => simplify(g, 8)) };
 }
 
-let summaryCache: Record<string, Activity> | null = null;
-async function readSummaries(): Promise<Record<string, Activity>> {
-  if (summaryCache) return summaryCache;
-  const raw = await AsyncStorage.getItem(SUMMARIES);
-  summaryCache = raw ? JSON.parse(raw) : {};
-  return summaryCache!;
+const CHUNK = 20;
+async function multiSetChunked(pairs: [string, string][]) {
+  for (let i = 0; i < pairs.length; i += CHUNK) await AsyncStorage.multiSet(pairs.slice(i, i + CHUNK));
 }
-async function writeSummaries(map: Record<string, Activity>) {
-  summaryCache = map;
-  await AsyncStorage.setItem(SUMMARIES, JSON.stringify(map));
+/**
+ * Read many keys, a few at a time. If a chunk fails (e.g. one value is too big to read on Android),
+ * its keys are read one by one and only the unreadable ones are skipped, so one bad row can't hide all.
+ */
+async function readMany<T>(keys: string[]): Promise<Map<string, T>> {
+  const out = new Map<string, T>();
+  const take = (k: string, v: string | null) => { if (v) { try { out.set(k, JSON.parse(v) as T); } catch { /* corrupt row */ } } };
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const part = keys.slice(i, i + CHUNK);
+    try {
+      for (const [k, v] of await AsyncStorage.multiGet(part)) take(k, v);
+    } catch {
+      for (const k of part) { try { take(k, await AsyncStorage.getItem(k)); } catch { /* unreadable */ } }
+    }
+  }
+  return out;
+}
+
+let summaryCache: Record<string, Activity> | null = null;
+/** One-time move of the old combined summaries blob to per-activity keys (every caller waits for it). */
+let migration: Promise<void> | null = null;
+const migrateLegacySummaries = () => (migration ??= (async () => {
+  try {
+    const raw = await AsyncStorage.getItem(LEGACY_SUMMARIES);
+    if (raw) {
+      const old = JSON.parse(raw) as Record<string, Activity>;
+      await multiSetChunked(Object.values(old).map((a) => [summaryKey(a.id), JSON.stringify(a)]));
+    }
+  } catch { /* unreadable: the summaries are rebuilt from the activities instead */ }
+  await AsyncStorage.removeItem(LEGACY_SUMMARIES).catch(() => undefined);
+})());
+
+/** Summaries for these ids that exist in storage (cached in memory after the first read). */
+async function readSummaries(ids: string[]): Promise<Record<string, Activity>> {
+  await migrateLegacySummaries();
+  const map = (summaryCache ??= {});
+  const missing = ids.filter((id) => !map[id]);
+  if (missing.length) for (const s of (await readMany<Activity>(missing.map(summaryKey))).values()) map[s.id] = s;
+  return map;
 }
 
 /** Light copies for lists, newest first. Builds missing summaries once (migration from older versions). */
 export async function listActivities(): Promise<Activity[]> {
   const ids = await readIndex();
   if (!ids.length) return [];
-  const map = await readSummaries();
-  const missing = ids.filter((id) => !map[id]);
-  if (missing.length) {
-    const rows = await AsyncStorage.multiGet(missing.map(item));
-    for (const [, v] of rows) if (v) { const a = JSON.parse(v) as Activity; map[a.id] = toSummary(a); }
-    await writeSummaries({ ...map });
+  const map = await readSummaries(ids);
+  if (ids.some((id) => !map[id])) {
+    // build missing summaries from the full activities, queued with the writes so a save that happens
+    // meanwhile can't be overwritten by a summary of the older copy
+    await serial(async () => {
+      const missing = ids.filter((id) => !map[id]);
+      const built: [string, string][] = [];
+      for (const a of (await readMany<Activity>(missing.map(item))).values()) {
+        const s = toSummary(a);
+        map[a.id] = s;
+        built.push([summaryKey(a.id), JSON.stringify(s)]);
+      }
+      await multiSetChunked(built);
+    });
   }
   return ids.map((id) => map[id]).filter((a): a is Activity => !!a).sort((a, b) => b.startedAt - a.startedAt);
 }
@@ -79,8 +123,7 @@ export async function listActivities(): Promise<Activity[]> {
 export async function listFullActivities(): Promise<Activity[]> {
   const ids = await readIndex();
   if (!ids.length) return [];
-  const rows = await AsyncStorage.multiGet(ids.map(item));
-  return rows.map(([, v]) => (v ? (JSON.parse(v) as Activity) : null)).filter((a): a is Activity => !!a);
+  return [...(await readMany<Activity>(ids.map(item))).values()];
 }
 
 export async function getActivity(id: string): Promise<Activity | null> {
@@ -93,9 +136,11 @@ export function saveActivity(a: Activity, opts: { silent?: boolean } = {}): Prom
   return serial(async () => {
     const ids = await readIndex();
     if (!ids.includes(a.id)) ids.push(a.id);
-    const map = await readSummaries();
-    await AsyncStorage.multiSet([[item(a.id), JSON.stringify(a)], [INDEX, JSON.stringify(ids)]]);
-    await writeSummaries({ ...map, [a.id]: toSummary(a) });
+    const summary = toSummary(a);
+    await migrateLegacySummaries(); // the old combined blob must not be copied over this later
+    // one atomic write: the activity, its summary and the index always agree
+    await AsyncStorage.multiSet([[item(a.id), JSON.stringify(a)], [summaryKey(a.id), JSON.stringify(summary)], [INDEX, JSON.stringify(ids)]]);
+    (summaryCache ??= {})[a.id] = summary;
     if (!opts.silent) emit();
   });
 }
@@ -116,14 +161,20 @@ export function importActivities(list: Activity[]): Promise<number> {
       fresh.push({ ...a, lite: undefined, efforts: undefined });
     }
     if (!fresh.length) return 0;
-    const map = { ...(await readSummaries()) };
+    await migrateLegacySummaries();
+    const map = (summaryCache ??= {});
     // a few activities per write keeps each native call (and its memory spike) small
-    for (let i = 0; i < fresh.length; i += 20) {
-      await AsyncStorage.multiSet(fresh.slice(i, i + 20).map((a) => [item(a.id), JSON.stringify(a)] as [string, string]));
+    for (let i = 0; i < fresh.length; i += 10) {
+      const pairs: [string, string][] = [];
+      for (const a of fresh.slice(i, i + 10)) {
+        const s = toSummary(a);
+        map[a.id] = s;
+        pairs.push([item(a.id), JSON.stringify(a)], [summaryKey(a.id), JSON.stringify(s)]);
+      }
+      await AsyncStorage.multiSet(pairs);
     }
-    for (const a of fresh) { ids.push(a.id); map[a.id] = toSummary(a); }
-    await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
-    await writeSummaries(map);
+    for (const a of fresh) ids.push(a.id);
+    await AsyncStorage.setItem(INDEX, JSON.stringify(ids)); // the index last: a cut-short import leaves no dangling ids
     emit();
     return fresh.length;
   });
@@ -131,13 +182,11 @@ export function importActivities(list: Activity[]): Promise<number> {
 
 export function deleteActivity(id: string): Promise<Activity | null> {
   return serial(async () => {
-    const full = await getActivity(id);
+    const full = await getActivity(id).catch(() => null); // an unreadable activity can still be deleted
     const ids = (await readIndex()).filter((x) => x !== id);
-    const map = { ...(await readSummaries()) };
-    delete map[id];
     await AsyncStorage.setItem(INDEX, JSON.stringify(ids));
-    await AsyncStorage.removeItem(item(id));
-    await writeSummaries(map);
+    await AsyncStorage.multiRemove([item(id), summaryKey(id)]);
+    if (summaryCache) delete summaryCache[id];
     emit();
     return full; // lets the caller offer "Undo"
   });

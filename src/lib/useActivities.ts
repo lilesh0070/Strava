@@ -6,7 +6,12 @@ import type { Activity } from './types';
 export function useActivities() {
   const [state, setState] = useState<{ items: Activity[] | null; loadedAt: number }>(() => ({ items: null, loadedAt: Date.now() }));
   const reload = useCallback(() => {
-    listActivities().then((items) => setState({ items, loadedAt: Date.now() }));
+    listActivities()
+      .then((items) => setState({ items, loadedAt: Date.now() }))
+      .catch((e) => {
+        console.warn('Could not load activities', e);
+        setState((s) => ({ items: s.items ?? [], loadedAt: Date.now() })); // keep what was shown, stop the skeleton
+      });
   }, []);
   useEffect(() => {
     reload();

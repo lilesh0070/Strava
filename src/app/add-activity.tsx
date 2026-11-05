@@ -27,7 +27,9 @@ export default function AddActivity() {
     if (busy.current) return;
     busy.current = true;
     setSaving(true);
-    try { await saveEntry(); } finally { busy.current = false; setSaving(false); }
+    try { await saveEntry(); }
+    catch (e) { Alert.alert('Could not save', String((e as Error)?.message ?? e)); } // the form stays filled in
+    finally { busy.current = false; setSaving(false); }
   };
 
   const saveEntry = async () => {

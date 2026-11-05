@@ -1,4 +1,4 @@
-import { restore } from '../lib/tracker'; // importing it also registers the background location task at startup
+import { restore } from '../lib/tracker'; // the background task itself is defined from index.js, before any route loads
 import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
