@@ -1,7 +1,10 @@
 // Large JSON documents (every activity with its GPS points, the list summaries, the live recording)
 // live in files instead of AsyncStorage. On Android, AsyncStorage caps the whole database at 6 MB
 // and a single value at ~2 MB, so a few dozen GPS-rich runs would silently stop saving. Files have no
-// such limit and are part of Android's automatic app backup. The web build keeps using localStorage.
+// such limit. Android's backup and phone-to-phone transfer copy this folder except the live recording
+// (session.json), see plugins/withBackupRules.js; Google's cloud backup holds at most 25 MB per app and
+// silently skips the whole app once its data is bigger, so Settings → Backup / GitHub sync remain the
+// dependable copy of a long history. The web build keeps using localStorage.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';

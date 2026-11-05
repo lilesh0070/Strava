@@ -37,6 +37,13 @@
         "FOREGROUND_SERVICE_LOCATION",
         "REQUEST_INSTALL_PACKAGES"
       ],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
       "predictiveBackGestureEnabled": false,
       "versionCode": 14
     },
@@ -84,15 +91,19 @@
       [
         "expo-notifications",
         {
-          "enableRemoteNotifications": false
+          "enableRemoteNotifications": false,
+          "icon": "./assets/notification-icon.png",
+          "color": "#F2762E"
         }
       ],
       "./plugins/withReleaseSigning",
       "./plugins/withAsyncStorageSize",
+      "./plugins/withBackupRules",
       [
         "expo-secure-store",
         {
-          "faceIDPermission": false
+          "faceIDPermission": false,
+          "configureAndroidBackup": false
         }
       ],
       [

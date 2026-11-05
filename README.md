@@ -60,7 +60,8 @@ Wellbeing guidance only, not medical advice.
   - Every activity, with all its GPS points, is stored as its own file.
   - There is no size limit (AsyncStorage on Android caps the whole database at 6 MB).
   - Writes are crash-safe.
-  - Files are included in Android's automatic backup.
+  - Android's own backup (Google cloud backup and phone-to-phone transfer) brings activities, settings, profile, gear and the wellness log to a new phone. It leaves out a recording in progress and the GitHub / Friends sign-ins (they stay in the old phone's keystore; connect again on the new phone).
+  - Google's cloud backup holds at most 25 MB per app: Android Auto Backup silently stops once app data passes 25 MB (roughly 85 hours of recorded GPS). Phone-to-phone transfer has no cap. To be sure your whole history survives a new phone, use **Settings → Backup** or **GitHub cloud backup**.
   - A recording is only cleared once its activity is safely saved.
   - Existing activities move over automatically on first launch.
 - **Maps.** Uses Leaflet with OpenStreetMap tiles, so no API key is needed.
@@ -138,7 +139,7 @@ Wellbeing guidance only, not medical advice.
 - **Share this app.** Settings → Share this app sends a link to the newest APK (from an iPhone: the release page with the APK and the .ipa).
 - **Backup / restore.** Export everything to one JSON file and import it on another phone. Imports only add what is missing: they never delete anything and never overwrite activities, gear or a profile already on the phone.
 
-Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and your week/month/total km in Firebase).
+Your data stays on the phone: activities, their GPS points, the list summaries and the live recording are files (see `src/lib/blobStore.ts`); settings, gear, profile and the wellness log are in AsyncStorage. Only two optional features go online: GitHub cloud backup (a secret Gist on your own account) and Friends (your name and your week/month/total km in Firebase). Android's own backup, when it is turned on in the phone's settings, also copies the app's data to your Google account (see *Your data is kept safe* above).
 
 ## Releasing an update (all on GitHub)
 
@@ -368,6 +369,13 @@ Read this before touching the parts below; each rule exists because breaking it 
   read it in `board()` with a default (friends on old versions don't send it), show it in
   `src/app/friends.tsx`, add it to `device()` in `scripts/friends-rules.test.ts`, and update the privacy note
   under *Friends & leaderboard*.
+
+**Storage and Android backup**
+- Android's backup and phone-to-phone transfer copy only what `plugins/withBackupRules.js` lists: the
+  `tbdi-data/` folder of `src/lib/blobStore.ts` (without the live `session.json`) and the AsyncStorage
+  database. Data kept anywhere else (another folder, SharedPreferences) never reaches a new phone. SecureStore
+  must stay out: its keystore keys never leave the old phone, so a copy can't be decrypted. Changing the rules
+  is native config and needs a new release.
 
 **Map**
 - Leaflet is inlined from `src/lib/leafletSrc.ts` (generated: don't edit it, don't go back to a CDN `<script>`,
